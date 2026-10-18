@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # CampusNet: High-Security Ephemeral Communications Network
 
 CampusNet is a high-security, campus-focused ephemeral communications network engineered with zero-knowledge end-to-end encryption (E2EE), client-side Double Ratchet and Extended Triple Diffie-Hellman (X3DH) key agreement, forward secrecy, sub-second burn-on-read ephemerality, and privacy-preserving campus access point (BSSID) location zones.
@@ -89,3 +90,6 @@ npm run dev
 cd desktop/src-tauri
 cargo tauri dev
 ```
+=======
+# HIT-CHAT
+>>>>>>> 9ebd07873726e0682b3df3279d211ec3bfc3685b
