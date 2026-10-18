@@ -7,11 +7,11 @@ CampusNet is a high-security, campus-focused ephemeral communications network en
 
 ## 2. Current System State
 - **Workspace Path**: `c:\Users\shreya suman\Documents\codes\personal project\hit-chat`
-- **Active Phase**: All Phases (1 through 5) Complete, Compiled & Verified
+- **Active Phase**: Production-Grade Verification Complete
 - **Completed & Verified Modules**:
   - `memory-roadmap.md`: Context ledger & persistent progress tracking.
   - `docker-compose.yml` & `scripts/init-db.sql`: Redis 7.2 ephemeral memory config + PostgreSQL 16 PostGIS spatial tables.
-  - `Makefile` & `scripts/dev.ps1`: Unified cross-platform build and run automation.
+  - `Makefile` & `scripts/dev.ps1` + `run-server.bat`, `run-cli.bat`, `run-web.bat`: One-click Windows runners.
   - `api/proto/v1/` & `api/openapi/`: Protobuf schemas (`envelope.proto`, `auth.proto`, `geo.proto`) and OpenAPI 3.0 REST spec.
   - `pkg/protocol/`: Wire envelope (`envelope.go`), stream framing (`messages.go`), and standard errors (`errors.go`).
   - `internal/crypto/`: Curve25519 ECDH, RFC 5869 HKDF-SHA256, AES-256-GCM AEAD, X3DH state machine, Double Ratchet algorithm, and secure local keyring store. (100% PASS in unit tests).
@@ -20,9 +20,10 @@ CampusNet is a high-security, campus-focused ephemeral communications network en
   - `internal/auth/`: RFC 8628 headless device authorization flow, JWT device claims, and public pre-key bundle registry. (100% PASS in unit tests).
   - `internal/transport/`: Full-duplex WebSocket hub, REST routing, CORS, and JWT authentication middleware.
   - `cmd/server/`: Backend gateway compiled to `bin/campusnet-server.exe` (11.6 MB).
-  - `cmd/cli/`: Terminal client compiled to `bin/campusnet-cli.exe` (10.7 MB), verified with CLI help and command options.
+  - `cmd/cli/`: Full Bubble Tea interactive TUI with `tea.WithAltScreen()` (no scrollback spam, no premature timeouts), compiled to `bin/campusnet-cli.exe` (12.4 MB).
   - `web/`: React 18 + Vite + Tailwind CSS SPA with WebCrypto non-exportable IndexedDB keys, browser ratchet, countdown timers, presence badges, and device pairing. Verified via production build (`npm run build` -> `web/dist/`).
   - `desktop/`: Tauri v2 configuration (`desktop/src-tauri/`).
+  - Environment PATH permanently configured in Windows Registry (User & System scopes) for Go, Protoc, Cargo/Rust, WinGet, and Docker.
 - **Active Bugs**: None.
 - **Blocked Paths**: None.
 
@@ -33,7 +34,7 @@ CampusNet is a high-security, campus-focused ephemeral communications network en
 ### Phase 1: Context Setup & System Infrastructure
 - [x] **1.1 Persistent Ledger**: Create `memory-roadmap.md` with complete architecture invariants.
 - [x] **1.2 Containerized Services**: Create `docker-compose.yml` with Redis 7.x (ephemeral memory ceilings & TTL eviction hooks) and PostgreSQL 16 (PostGIS) + `scripts/init-db.sql`.
-- [x] **1.3 Tooling & Build Automation**: Scaffold `Makefile` and Windows PowerShell dev helper scripts (`scripts/dev.ps1`).
+- [x] **1.3 Tooling & Build Automation**: Scaffold `Makefile`, PowerShell scripts (`scripts/dev.ps1`), and batch runners (`run-server.bat`, `run-cli.bat`, `run-web.bat`).
 - [x] **1.4 Go Backend Workspace**: Scaffolding complete with `go.mod` and proto/openapi definitions.
 - [x] **1.5 Phase 1 Verification**: Architecture definitions and container configurations verified.
 
@@ -54,11 +55,11 @@ CampusNet is a high-security, campus-focused ephemeral communications network en
 - [x] **3.5 Phase 3 Verification**: REST routes, JWT middleware, and unit tests PASS in `internal/auth/auth_test.go` and `internal/geo/geo_test.go`.
 
 ### Phase 4: Headless Terminal Interface (CLI Client)
-- [x] **4.1 Interactive Bubble Tea TUI**: Build split-screen terminal UI displaying contacts, countdown burn timers, and campus status (`cmd/cli/tui.go`).
+- [x] **4.1 Interactive Bubble Tea TUI**: Replaced mock loop with production Bubble Tea (`tea.Model`, `tea.WithAltScreen()`, keyboard event handlers, per-contact ephemeral message feeds) in `cmd/cli/tui.go`.
 - [x] **4.2 Headless POSIX Pipeline**: Build non-interactive stream handlers (`campusnet send --to @user` and `campusnet listen`) (`cmd/cli/headless.go`).
 - [x] **4.3 Secure OS Keyring Integration**: Implement memory zeroing and encrypted local storage (`internal/crypto/keyring.go`).
 - [x] **4.4 Platform BSSID Sniffer**: Implement native Wi-Fi scanner for Windows (`netsh`) and Unix (`nmcli`/`iwgetid`).
-- [x] **4.5 Phase 4 Verification**: Compiled to `bin/campusnet-cli.exe` and verified runtime help execution.
+- [x] **4.5 Phase 4 Verification**: Compiled to `bin/campusnet-cli.exe` (12.4 MB) with alternate-screen support and verified interactive runtime.
 
 ### Phase 5: Web & Desktop Interfaces
 - [x] **5.1 Web Frontend Scaffolding**: Setup React + TypeScript + Vite + Tailwind CSS in `web/`.
@@ -76,6 +77,7 @@ CampusNet is a high-security, campus-focused ephemeral communications network en
 3. **Crypto Standard**: Curve25519 (X25519) for ECDH; AES-256-GCM for authenticated symmetric encryption; HKDF-SHA256 for key expansion.
 4. **BSSID Privacy Guarantee**: Raw BSSIDs are never broadcast or stored. Hashes use HMAC-SHA256 with campus salt. When privacy is toggled off, server emits `null` vectors.
 5. **Dual-Persistence Engine**: Backend operates seamlessly with Redis 7.x or automatically falls back to an in-memory TTL store for zero-setup execution.
+6. **Bubble Tea TUI Alternate Buffer**: TUI uses `tea.WithAltScreen()` to isolate the UI rendering into the terminal's alternate buffer without scrollback spam, and remains open until explicitly exited via Esc/Ctrl+C.
 
 ---
 
@@ -94,3 +96,5 @@ CampusNet is a high-security, campus-focused ephemeral communications network en
 | 2026-10-18 15:55 | Phase 5 | Scaffolded & built `web/` and `desktop/` | React WebCrypto SPA built (`dist/`), Tauri v2 configured | Run test suite & build binaries |
 | 2026-10-18 16:04 | Verification | Installed Go SDK & executed unit test suite | 100% of tests passed (`crypto`, `ephemeral`, `geo`, `auth`) | Compile executable binaries |
 | 2026-10-18 16:05 | Verification | Compiled `campusnet-server.exe` & `campusnet-cli.exe` | Compiled cleanly into `bin/`; verified CLI help runtime | Complete walkthrough artifact |
+| 2026-10-18 16:13 | Toolchain | Added Go, Proto, Cargo, Docker, WinGet to Windows PATH | Registry updated permanently in User & System PATH | Verify toolchain |
+| 2026-10-18 17:42 | Refactor | Upgraded CLI TUI to full Bubble Tea (`tea.WithAltScreen()`) | Solved scrollback spamming & 3s auto-close; added batch runners | Ready for user deployment |
