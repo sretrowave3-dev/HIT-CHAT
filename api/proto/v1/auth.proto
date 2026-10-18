@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package campusnet.v1;
+
+option go_package = "github.com/hit-chat/campusnet/pkg/protocol";
+
+// RFC 8628 Device Authorization Flow
+message DeviceCodeRequest {
+    string client_id = 1;
+    string platform = 2; // "cli", "web", "desktop"
+    string public_identity_key = 3;
+}
+
+message DeviceCodeResponse {
+    string device_code = 1;
+    string user_code = 2;
+    string verification_uri = 3;
+    int32 expires_in = 4;
+    int32 interval = 5;
+}
+
+message DeviceTokenRequest {
+    string device_code = 1;
+    string client_id = 2;
+}
+
+message DeviceTokenResponse {
+    string access_token = 1;
+    string token_type = 2;
+    int32 expires_in = 3;
+    string device_id = 4;
+}
+
+message PreKeyBundleUpload {
+    string device_id = 1;
+    string identity_key = 2;
+    string signed_prekey = 3;
+    string signed_prekey_signature = 4;
+    repeated string one_time_prekeys = 5;
+}
+
+message PreKeyBundleResponse {
+    string device_id = 1;
+    string identity_key = 2;
+    string signed_prekey = 3;
+    string signed_prekey_signature = 4;
+    string one_time_prekey = 5; // Single consumed pre-key or empty if exhausted
+}

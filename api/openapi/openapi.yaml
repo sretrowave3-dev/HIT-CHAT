@@ -1,0 +1,155 @@
+openapi: 3.0.3
+info:
+  title: CampusNet Core API
+  description: High-security campus ephemeral communications network API.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local Backend Gateway
+
+paths:
+  /auth/device/code:
+    post:
+      summary: Request device authorization code (RFC 8628)
+      operationId: requestDeviceCode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_id, platform, public_identity_key]
+              properties:
+                client_id:
+                  type: string
+                platform:
+                  type: string
+                  enum: [cli, web, desktop]
+                public_identity_key:
+                  type: string
+      responses:
+        '200':
+          description: Device code generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  device_code:
+                    type: string
+                  user_code:
+                    type: string
+                  verification_uri:
+                    type: string
+                  expires_in:
+                    type: integer
+                  interval:
+                    type: integer
+
+  /auth/device/token:
+    post:
+      summary: Poll for device token authorization
+      operationId: pollDeviceToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_code, client_id]
+              properties:
+                device_code:
+                  type: string
+                client_id:
+                  type: string
+      responses:
+        '200':
+          description: Token issued
+        '400':
+          description: Pending authorization or expired
+
+  /auth/device/verify:
+    post:
+      summary: Web client approves pending device code
+      operationId: verifyDeviceCode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_code, user_handle]
+              properties:
+                user_code:
+                  type: string
+                user_handle:
+                  type: string
+      responses:
+        '200':
+          description: Device successfully authorized
+
+  /crypto/bundle:
+    post:
+      summary: Upload public pre-key bundle
+      operationId: uploadPrekeyBundle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id, identity_key, signed_prekey, signed_prekey_signature]
+              properties:
+                device_id:
+                  type: string
+                identity_key:
+                  type: string
+                signed_prekey:
+                  type: string
+                signed_prekey_signature:
+                  type: string
+                one_time_prekeys:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '201':
+          description: Bundle stored successfully
+
+  /crypto/bundle/{deviceId}:
+    get:
+      summary: Fetch peer public pre-key bundle for X3DH session initiation
+      operationId: getPrekeyBundle
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Prekey bundle returned
+
+  /geo/resolve:
+    post:
+      summary: Resolve AP BSSID hash to campus zone with privacy enforcement
+      operationId: resolveLocation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [location_enabled]
+              properties:
+                bssid_hash:
+                  type: string
+                location_enabled:
+                  type: boolean
+                latitude:
+                  type: number
+                longitude:
+                  type: number
+      responses:
+        '200':
+          description: Resolved zone or protected status

@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package campusnet.v1;
+
+option go_package = "github.com/hit-chat/campusnet/pkg/protocol";
+
+message BSSIDResolutionRequest {
+    // SHA-256 / HMAC hash of BSSID
+    string bssid_hash = 1;
+    // Strict privacy toggle
+    bool location_enabled = 2;
+    // Optional client GPS coordinates (only processed if location_enabled=true)
+    double latitude = 3;
+    double longitude = 4;
+}
+
+message BSSIDResolutionResponse {
+    string zone_code = 1;
+    string display_name = 2;
+    string building_name = 3;
+    int32 floor_level = 4;
+    bool is_protected = 5;
+}
+
+message RegisterAccessPointRequest {
+    string bssid_hash = 1;
+    string zone_code = 2;
+    string description = 3;
+    int32 signal_threshold = 4;
+}

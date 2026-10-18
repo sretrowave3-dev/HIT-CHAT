@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package campusnet.v1;
+
+option go_package = "github.com/hit-chat/campusnet/pkg/protocol";
+
+// Cryptographic Wire Envelope for E2EE Message Delivery
+message Envelope {
+    // Unique message identifier (UUID v4)
+    string id = 1;
+    // Recipient device identifier or user handle
+    string recipient_id = 2;
+    // Sender device identifier or ephemeral ID
+    string sender_id = 3;
+    // Ephemeral Curve25519 public key (32 bytes)
+    bytes ephemeral_public_key = 4;
+    // Diffie-Hellman ratchet sequence number
+    uint32 ratchet_seq = 5;
+    // Symmetric KDF chain sequence number
+    uint32 chain_seq = 6;
+    // Initialization Vector / Nonce for AEAD cipher (12 bytes)
+    bytes iv = 7;
+    // Encrypted message payload (ChaCha20-Poly1305 ciphertext)
+    bytes ciphertext = 8;
+    // Authentication Tag / MAC (16 bytes)
+    bytes auth_tag = 9;
+    // Millisecond-grade Time-To-Live before automatic burn
+    int64 ttl_ms = 10;
+    // UTC Unix timestamp (milliseconds)
+    int64 timestamp_ms = 11;
+}
+
+// WebSocket Stream Message Frame
+message StreamFrame {
+    enum Opcode {
+        UNKNOWN = 0;
+        SEND_ENVELOPE = 1;
+        DELIVER_ENVELOPE = 2;
+        ACK_DELIVERED = 3;
+        ACK_READ = 4;
+        HEARTBEAT = 5;
+        UPDATE_PRESENCE = 6;
+        ZONE_PRESENCE = 7;
+        ERROR = 8;
+    }
+
+    Opcode op = 1;
+    string session_id = 2;
+    Envelope envelope = 3;
+    string ack_message_id = 4;
+    PresencePayload presence = 5;
+    string error_message = 6;
+}
+
+message PresencePayload {
+    string bssid_hash = 1;
+    string zone_code = 2;
+    string display_zone = 3;
+    bool location_enabled = 4;
+    double latitude = 5;
+    double longitude = 6;
+}
