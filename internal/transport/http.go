@@ -28,6 +28,12 @@ func isLoopback(r *http.Request) bool {
 	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
+const MaxRequestBodyBytes = 1 << 20 // 1 MB maximum payload limit to prevent memory exhaustion DoS
+
+func limitRequestBody(w http.ResponseWriter, req *http.Request) {
+	req.Body = http.MaxBytesReader(w, req.Body, MaxRequestBodyBytes)
+}
+
 // Router sets up HTTP REST endpoints.
 type Router struct {
 	mux           *http.ServeMux
@@ -145,6 +151,8 @@ func (r *Router) handleSession(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	limitRequestBody(w, req)
+
 	// Unauthenticated direct session minting is only permitted on loopback interfaces for local tooling.
 	// Remote devices must complete RFC 8628 device authorization flow.
 	if !isLoopback(req) {
@@ -161,7 +169,10 @@ func (r *Router) handleSession(w http.ResponseWriter, req *http.Request) {
 		DeviceID   string `json:"device_id"`
 		Platform   string `json:"platform"`
 	}
-	_ = json.NewDecoder(req.Body).Decode(&body)
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid request body or exceeds size limit"}`, http.StatusBadRequest)
+		return
+	}
 
 	if body.UserHandle == "" {
 		body.UserHandle = "alice"
@@ -196,10 +207,11 @@ func (r *Router) handleDeviceCode(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	limitRequestBody(w, req)
 
 	var body protocol.DeviceCodeRequest
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		http.Error(w, `{"error":"invalid request json"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"invalid request json or exceeds payload limit"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -218,13 +230,14 @@ func (r *Router) handleDeviceToken(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	limitRequestBody(w, req)
 
 	var body struct {
 		DeviceCode string `json:"device_code"`
 		ClientID   string `json:"client_id"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		http.Error(w, `{"error":"invalid request json"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"invalid request json or exceeds payload limit"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -245,13 +258,14 @@ func (r *Router) handleDeviceVerify(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	limitRequestBody(w, req)
 
 	var body struct {
 		UserCode   string `json:"user_code"`
 		UserHandle string `json:"user_handle"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		http.Error(w, `{"error":"invalid request json"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"invalid request json or exceeds payload limit"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -346,13 +360,17 @@ func (r *Router) handleDeviceAuto(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	limitRequestBody(w, req)
 
 	var body struct {
 		UserHandle string `json:"user_handle"`
 		UserCode   string `json:"user_code"`
 		Platform   string `json:"platform"`
 	}
-	_ = json.NewDecoder(req.Body).Decode(&body)
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid request json or exceeds payload limit"}`, http.StatusBadRequest)
+		return
+	}
 
 	if body.UserHandle == "" {
 		body.UserHandle = "cli_user"
@@ -424,6 +442,7 @@ func (r *Router) handleBundleUpload(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	limitRequestBody(w, req)
 
 	// Authenticate client to prevent MITM key hijacking attacks
 	tokenStr := req.URL.Query().Get("token")
@@ -526,6 +545,7 @@ func (r *Router) handleGeoResolve(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	limitRequestBody(w, req)
 
 	var payload protocol.PresencePayload
 	if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
