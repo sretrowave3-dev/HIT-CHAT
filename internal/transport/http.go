@@ -3,6 +3,7 @@ package transport
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,6 +14,19 @@ import (
 	"github.com/hit-chat/campusnet/internal/geo"
 	"github.com/hit-chat/campusnet/pkg/protocol"
 )
+
+// isLoopback checks if request originates from localhost / loopback adapter.
+func isLoopback(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	if ip != nil && ip.IsLoopback() {
+		return true
+	}
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
 
 // Router sets up HTTP REST endpoints.
 type Router struct {
@@ -128,6 +142,17 @@ func (r *Router) handleHealth(w http.ResponseWriter, req *http.Request) {
 func (r *Router) handleSession(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Unauthenticated direct session minting is only permitted on loopback interfaces for local tooling.
+	// Remote devices must complete RFC 8628 device authorization flow.
+	if !isLoopback(req) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "direct session minting is forbidden over remote network interfaces; use device flow (/api/v1/auth/device/code)",
+		})
 		return
 	}
 
@@ -247,6 +272,35 @@ func (r *Router) handleDevicePending(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	var authenticatedUser string
+	if !isLoopback(req) {
+		// Remote requests require an authenticated session to prevent unauthenticated enumeration of pairing codes
+		authHeader := req.Header.Get("Authorization")
+		tokenStr := ""
+		if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+			tokenStr = strings.TrimSpace(authHeader[7:])
+		}
+		if tokenStr == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": "authentication required to list pending device authorizations over remote network",
+			})
+			return
+		}
+		claims, err := r.tokenMgr.ValidateToken(tokenStr)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": "invalid or expired token",
+			})
+			return
+		}
+		authenticatedUser = strings.TrimPrefix(strings.ToLower(claims.UserHandle), "@")
+		authenticatedUser = strings.TrimPrefix(authenticatedUser, "student_")
+	}
+
 	sessions := r.deviceFlow.GetPendingSessions()
 	type pendingView struct {
 		UserCode  string `json:"user_code"`
@@ -261,6 +315,14 @@ func (r *Router) handleDevicePending(w http.ResponseWriter, req *http.Request) {
 	for _, s := range sessions {
 		rem := s.ExpiresAt.Sub(now).Seconds()
 		if rem > 0 {
+			// If request is from remote authenticated user, only show pending sessions requested for that user
+			if authenticatedUser != "" {
+				sReq := strings.TrimPrefix(strings.ToLower(s.RequestedUserHandle), "@")
+				sReq = strings.TrimPrefix(sReq, "student_")
+				if sReq != authenticatedUser {
+					continue
+				}
+			}
 			list = append(list, pendingView{
 				UserCode:  s.UserCode,
 				Platform:  s.Platform,
@@ -327,7 +389,16 @@ func (r *Router) handleDeviceAuto(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 3. If no pending session, mint an immediate session (instant auto-connect)
+	// 3. If no pending session, mint an immediate session (instant auto-connect permitted on loopback only)
+	if !isLoopback(req) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "instant auto-connect minting forbidden from remote network; use device pairing flow",
+		})
+		return
+	}
+
 	if body.Platform == "" {
 		body.Platform = "cli"
 	}

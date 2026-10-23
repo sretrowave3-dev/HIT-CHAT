@@ -351,6 +351,7 @@ export const App: React.FC = () => {
         userHandle={currentUser}
         isOpen={isPairingOpen}
         onClose={() => setIsPairingOpen(false)}
+        token={token}
       />
     </div>
   );

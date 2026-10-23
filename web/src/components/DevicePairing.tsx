@@ -5,12 +5,14 @@ interface DevicePairingProps {
   userHandle: string;
   isOpen: boolean;
   onClose: () => void;
+  token?: string | null;
 }
 
 export const DevicePairing: React.FC<DevicePairingProps> = ({
   userHandle,
   isOpen,
   onClose,
+  token,
 }) => {
   const [userCode, setUserCode] = useState('');
   const [status, setStatus] = useState<'idle' | 'authorizing' | 'success' | 'error'>('idle');
@@ -22,7 +24,9 @@ export const DevicePairing: React.FC<DevicePairingProps> = ({
     if (!isOpen) return;
     const fetchPending = async () => {
       try {
-        const res = await fetch('/api/v1/auth/device/pending');
+        const res = await fetch('/api/v1/auth/device/pending', {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        });
         if (res.ok) {
           const data = await res.json();
           if (data.pending_devices && data.pending_devices.length > 0) {
@@ -40,7 +44,7 @@ export const DevicePairing: React.FC<DevicePairingProps> = ({
     fetchPending();
     const interval = setInterval(fetchPending, 3000);
     return () => clearInterval(interval);
-  }, [isOpen]);
+  }, [isOpen, token]);
 
   const handleAutoAuthorize = async (code?: string) => {
     setStatus('authorizing');
@@ -49,7 +53,10 @@ export const DevicePairing: React.FC<DevicePairingProps> = ({
     try {
       const res = await fetch('/api/v1/auth/device/auto', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           user_code: (code || userCode || '').trim().toUpperCase(),
           user_handle: userHandle,
