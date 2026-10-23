@@ -97,6 +97,11 @@ func (r *Router) handleStaticOrSPA(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Sanitize and defend against directory traversal attacks
+	if strings.Contains(req.URL.Path, "..") || strings.Contains(req.URL.RawPath, "..") || strings.Contains(req.RequestURI, "..") {
+		http.Error(w, "Access Denied: Path traversal detected", http.StatusForbidden)
+		return
+	}
+
 	cleanPath := strings.TrimLeft(filepath.Clean(req.URL.Path), "/\\")
 	targetPath := filepath.Join(absStaticDir, cleanPath)
 
@@ -111,6 +116,13 @@ func (r *Router) handleStaticOrSPA(w http.ResponseWriter, req *http.Request) {
 	info, err := os.Stat(targetPath)
 	if err == nil && !info.IsDir() {
 		http.ServeFile(w, req, targetPath)
+		return
+	}
+
+	// If a static asset with an extension was not found, return 404 rather than leaking HTML
+	ext := filepath.Ext(cleanPath)
+	if ext != "" && ext != ".html" {
+		http.NotFound(w, req)
 		return
 	}
 

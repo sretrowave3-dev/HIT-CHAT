@@ -61,6 +61,19 @@ func CORSMiddleware(next http.Handler) http.Handler {
 			w.Header().Set("Vary", "Origin")
 		}
 
+		// Path traversal and directory traversal defense
+		uri := r.RequestURI
+		path := r.URL.Path
+		rawPath := r.URL.RawPath
+		lowerURI := strings.ToLower(uri)
+		if strings.Contains(uri, "..") || strings.Contains(path, "..") || strings.Contains(rawPath, "..") ||
+			strings.Contains(uri, `\`) || strings.Contains(path, `\`) ||
+			strings.Contains(lowerURI, "%2e") || strings.Contains(lowerURI, "%2f%2f") ||
+			strings.Contains(uri, "\x00") || strings.Contains(lowerURI, "%00") {
+			http.Error(w, "Access Denied: Path traversal detected", http.StatusForbidden)
+			return
+		}
+
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return

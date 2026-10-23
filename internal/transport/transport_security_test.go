@@ -157,3 +157,35 @@ func TestRequestBodySizeLimit(t *testing.T) {
 		t.Fatalf("expected 413 or 400 for oversized payload, got %d", rec.Code)
 	}
 }
+
+
+func TestStaticPathTraversalProtection(t *testing.T) {
+	router, _, _ := setupTestRouter()
+
+	traversalProbes := []string{
+		"/../../go.mod",
+		"/../go.mod",
+		"/assets/../../go.mod",
+		"/static/..%2f..%2fgo.mod",
+		"/..%2f..%2fsecret",
+		"/..\\..\\windows\\win.ini",
+	}
+
+	for _, probe := range traversalProbes {
+		req := httptest.NewRequest(http.MethodGet, probe, nil)
+		rec := httptest.NewRecorder()
+		router.Handler().ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("probe %q: expected 403 Forbidden, got %d", probe, rec.Code)
+		}
+	}
+
+	// Verify valid SPA route still returns 200 OK
+	spaReq := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	spaRec := httptest.NewRecorder()
+	router.Handler().ServeHTTP(spaRec, spaReq)
+	if spaRec.Code != http.StatusOK {
+		t.Fatalf("expected valid SPA route /chat to return 200 OK, got %d", spaRec.Code)
+	}
+}
