@@ -288,13 +288,61 @@ func (c *Client) handleFrame(frame *protocol.StreamFrame) {
 		c.sendFrame(ackFrame)
 		log.Printf("[WS] Routed envelope %s to %s (online=%v)", frame.Envelope.ID, frame.Envelope.RecipientID, delivered)
 
+	case protocol.OpAckDelivered:
+		if frame.AckMessageID != "" {
+			env, _ := c.hub.ephemeralMgr.RetrieveEnvelope(ctx, frame.AckMessageID)
+			if env != nil && env.SenderID != "" && env.SenderID != c.userHandle {
+				c.hub.routeFrameToTarget(env.SenderID, &protocol.StreamFrame{
+					Op:           protocol.OpAckDelivered,
+					AckMessageID: frame.AckMessageID,
+				})
+			}
+		}
+
 	case protocol.OpAckRead:
 		if frame.AckMessageID != "" {
+			env, _ := c.hub.ephemeralMgr.RetrieveEnvelope(ctx, frame.AckMessageID)
 			// IDOR Defense: Only burn if caller is legitimate recipient or sender of this message
 			if err := c.hub.ephemeralMgr.BurnOnReadForUser(ctx, frame.AckMessageID, c.userHandle); err != nil {
 				c.sendError("cannot burn envelope: " + err.Error())
 			} else {
 				log.Printf("[WS] Envelope burned on read by %s: %s", c.userHandle, frame.AckMessageID)
+				if env != nil && env.SenderID != "" && env.SenderID != c.userHandle {
+					c.hub.routeFrameToTarget(env.SenderID, &protocol.StreamFrame{
+						Op:           protocol.OpAckRead,
+						AckMessageID: frame.AckMessageID,
+					})
+				}
+			}
+		}
+
+	case protocol.OpNack:
+		if frame.AckMessageID != "" {
+			log.Printf("[WS] Decrypt NACK from %s for %s: %s", c.userHandle, frame.AckMessageID, frame.NackReason)
+			env, _ := c.hub.ephemeralMgr.RetrieveEnvelope(ctx, frame.AckMessageID)
+			if env != nil && env.SenderID != "" && env.SenderID != c.userHandle {
+				c.hub.routeFrameToTarget(env.SenderID, &protocol.StreamFrame{
+					Op:           protocol.OpNack,
+					AckMessageID: frame.AckMessageID,
+					NackReason:   frame.NackReason,
+				})
+			}
+		}
+
+	case protocol.OpTyping:
+		if frame.Typing != nil && frame.Typing.RecipientID != "" {
+			frame.Typing.SenderID = c.userHandle
+			c.hub.routeFrameToTarget(frame.Typing.RecipientID, frame)
+		}
+
+	case protocol.OpSync:
+		pending, err := c.hub.ephemeralMgr.GetPendingForRecipient(ctx, c.userHandle)
+		if err == nil {
+			for _, env := range pending {
+				c.sendFrame(&protocol.StreamFrame{
+					Op:       protocol.OpDeliverEnvelope,
+					Envelope: env,
+				})
 			}
 		}
 
@@ -371,25 +419,26 @@ func (c *Client) sendError(msg string) {
 	})
 }
 
-func (h *Hub) routeEnvelope(env *protocol.Envelope) bool {
+var defaultGroups = map[string][]string{
+	"study_group":  {"alice", "bob", "carol", "student_guest"},
+	"robotics_lab": {"alice", "bob", "student_guest"},
+}
+
+func (h *Hub) routeFrameToTarget(target string, frame *protocol.StreamFrame) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	frame := &protocol.StreamFrame{
-		Op:       protocol.OpDeliverEnvelope,
-		Envelope: env,
-	}
 	data, err := json.Marshal(frame)
 	if err != nil {
 		return false
 	}
 
+	cleanTarget := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(target)), "@")
 	delivered := false
 	deliveredClients := make(map[*Client]bool)
-	cleanTarget := strings.TrimPrefix(strings.ToLower(env.RecipientID), "@")
 
-	deliverTo := func(target string) {
-		if client, ok := h.byDevice[target]; ok {
+	deliverTo := func(tgt string) {
+		if client, ok := h.byDevice[tgt]; ok {
 			if !deliveredClients[client] {
 				select {
 				case client.send <- data:
@@ -399,7 +448,7 @@ func (h *Hub) routeEnvelope(env *protocol.Envelope) bool {
 				}
 			}
 		}
-		if clients, ok := h.byUser[target]; ok {
+		if clients, ok := h.byUser[tgt]; ok {
 			for _, client := range clients {
 				if !deliveredClients[client] {
 					select {
@@ -413,7 +462,25 @@ func (h *Hub) routeEnvelope(env *protocol.Envelope) bool {
 		}
 	}
 
-	deliverTo(env.RecipientID)
+	// Check if target is a group
+	if members, isGroup := defaultGroups[cleanTarget]; isGroup {
+		sender := ""
+		if frame.Envelope != nil {
+			sender = strings.TrimPrefix(strings.ToLower(frame.Envelope.SenderID), "@")
+		} else if frame.Typing != nil {
+			sender = strings.TrimPrefix(strings.ToLower(frame.Typing.SenderID), "@")
+		}
+		for _, member := range members {
+			cleanMember := strings.TrimPrefix(strings.ToLower(member), "@")
+			if cleanMember != sender && strings.TrimPrefix(cleanMember, "student_") != strings.TrimPrefix(sender, "student_") {
+				deliverTo(cleanMember)
+				deliverTo("student_" + cleanMember)
+			}
+		}
+		return delivered
+	}
+
+	deliverTo(target)
 	if !delivered {
 		deliverTo(cleanTarget)
 	}
@@ -426,6 +493,14 @@ func (h *Hub) routeEnvelope(env *protocol.Envelope) bool {
 	}
 
 	return delivered
+}
+
+func (h *Hub) routeEnvelope(env *protocol.Envelope) bool {
+	frame := &protocol.StreamFrame{
+		Op:       protocol.OpDeliverEnvelope,
+		Envelope: env,
+	}
+	return h.routeFrameToTarget(env.RecipientID, frame)
 }
 
 func (h *Hub) broadcastToAll(frame *protocol.StreamFrame) {

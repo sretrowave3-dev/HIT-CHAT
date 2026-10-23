@@ -1,0 +1,28 @@
+# Binaries and builds
+bin/
+dist/
+web/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Dependencies
+node_modules/
+web/node_modules/
+package-lock.json.bak
+
+# TLS certificates and dev secrets
+.campusnet-tls/
+*.pem
+*.key
+*.crt
+
+# OS and IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

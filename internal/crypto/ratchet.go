@@ -54,7 +54,11 @@ func NewDoubleRatchetInitiator(sharedKey []byte, bobDHRemotePub []byte) (*Double
 	if err != nil {
 		return nil, fmt.Errorf("generating initiator ratchet key: %w", err)
 	}
+	return NewDoubleRatchetInitiatorWithDH(sharedKey, dhLocal, bobDHRemotePub)
+}
 
+// NewDoubleRatchetInitiatorWithDH initializes Alice's ratchet state using a provided DH keypair (for deterministic testing & KATs).
+func NewDoubleRatchetInitiatorWithDH(sharedKey []byte, dhLocal *KeyPair, bobDHRemotePub []byte) (*DoubleRatchet, error) {
 	dhSecret, err := ComputeDH(dhLocal.PrivateKey, bobDHRemotePub)
 	if err != nil {
 		return nil, fmt.Errorf("initial dh ratchet failed: %w", err)

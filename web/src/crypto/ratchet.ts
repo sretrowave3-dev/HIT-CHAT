@@ -17,6 +17,37 @@ export interface WebEnvelope {
   timestamp_ms: number;
 }
 
+export function getCrypto(): Crypto {
+  if (typeof window !== 'undefined' && window.crypto) {
+    return window.crypto;
+  }
+  if (typeof globalThis !== 'undefined' && (globalThis as any).crypto) {
+    return (globalThis as any).crypto as Crypto;
+  }
+  throw new Error('WebCrypto API is not available in this environment');
+}
+
+export function getSubtle(): SubtleCrypto {
+  const c = getCrypto();
+  if (!c.subtle) {
+    throw new Error('WebCrypto subtle is unavailable. Ensure HTTPS or localhost is used.');
+  }
+  return c.subtle;
+}
+
+export function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+export function hexToBytes(hex: string): Uint8Array {
+  const clean = hex.trim();
+  const bytes = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(clean.substring(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
 export function canonicalHandle(h: string): string {
   let clean = (h || '').trim().toLowerCase().replace(/^@/, '');
   clean = clean.replace(/^student_/, '');
@@ -56,23 +87,23 @@ export function getPairwiseSecret(user1: string, user2: string): string {
 
 export class WebRatchet {
   /**
-   * Derives a pairwise AES-256 key matching Go's RFC 5869 HKDF-SHA256 derivation.
+   * Derives a pairwise AES-256 key raw bytes matching Go's RFC 5869 HKDF-SHA256 derivation.
    */
-  static async derivePairwiseKey(user1: string, user2: string): Promise<CryptoKey> {
+  static async derivePairwiseKeyBytes(user1: string, user2: string): Promise<Uint8Array> {
     const u1 = canonicalHandle(user1);
     const u2 = canonicalHandle(user2);
     const [first, second] = u1 <= u2 ? [u1, u2] : [u2, u1];
     const enc = new TextEncoder();
 
-    const baseKey = await window.crypto.subtle.importKey(
+    const baseKey = await getSubtle().importKey(
       'raw',
       enc.encode('CampusNet_Ratchet_Shared_Demo_Secret'),
       'HKDF',
       false,
-      ['deriveKey']
+      ['deriveBits']
     );
 
-    return window.crypto.subtle.deriveKey(
+    const bits = await getSubtle().deriveBits(
       {
         name: 'HKDF',
         hash: 'SHA-256',
@@ -80,6 +111,20 @@ export class WebRatchet {
         info: enc.encode(`CampusNet-v1-Pairwise:${first.length}:${first}:${second.length}:${second}`),
       },
       baseKey,
+      256
+    );
+
+    return new Uint8Array(bits);
+  }
+
+  /**
+   * Derives a pairwise AES-256 key matching Go's RFC 5869 HKDF-SHA256 derivation.
+   */
+  static async derivePairwiseKey(user1: string, user2: string): Promise<CryptoKey> {
+    const keyBytes = await this.derivePairwiseKeyBytes(user1, user2);
+    return getSubtle().importKey(
+      'raw',
+      keyBytes as any,
       { name: 'AES-GCM', length: 256 },
       false,
       ['encrypt', 'decrypt']
@@ -98,14 +143,79 @@ export class WebRatchet {
    */
   static async deriveKey(secret: string): Promise<CryptoKey> {
     const enc = new TextEncoder();
-    const rawKey = await window.crypto.subtle.digest('SHA-256', enc.encode(secret));
-    return window.crypto.subtle.importKey(
+    const rawKey = await getSubtle().digest('SHA-256', enc.encode(secret));
+    return getSubtle().importKey(
       'raw',
       rawKey,
       { name: 'AES-GCM' },
       false,
       ['encrypt', 'decrypt']
     );
+  }
+
+  /**
+   * Low-level AEAD Decrypt with optional AAD
+   */
+  static async decryptPayload(
+    keyBytes: Uint8Array,
+    iv: Uint8Array,
+    ciphertext: Uint8Array,
+    tag: Uint8Array,
+    aad?: Uint8Array
+  ): Promise<Uint8Array> {
+    const key = await getSubtle().importKey(
+      'raw',
+      keyBytes as any,
+      { name: 'AES-GCM' },
+      false,
+      ['decrypt']
+    );
+
+    const combined = new Uint8Array(ciphertext.length + tag.length);
+    combined.set(ciphertext, 0);
+    combined.set(tag, ciphertext.length);
+
+    const params: AesGcmParams = {
+      name: 'AES-GCM',
+      iv: iv as any,
+      tagLength: 128,
+      ...(aad ? { additionalData: aad as any } : {}),
+    };
+
+    const decrypted = await getSubtle().decrypt(params, key, combined as any);
+    return new Uint8Array(decrypted);
+  }
+
+  /**
+   * Low-level AEAD Encrypt with optional AAD
+   */
+  static async encryptPayload(
+    keyBytes: Uint8Array,
+    iv: Uint8Array,
+    plaintext: Uint8Array,
+    aad?: Uint8Array
+  ): Promise<{ ciphertext: Uint8Array; authTag: Uint8Array }> {
+    const key = await getSubtle().importKey(
+      'raw',
+      keyBytes as any,
+      { name: 'AES-GCM' },
+      false,
+      ['encrypt']
+    );
+
+    const params: AesGcmParams = {
+      name: 'AES-GCM',
+      iv: iv as any,
+      tagLength: 128,
+      ...(aad ? { additionalData: aad as any } : {}),
+    };
+
+    const encrypted = await getSubtle().encrypt(params, key, plaintext as any);
+    const encBytes = new Uint8Array(encrypted);
+    const cipherLen = encBytes.length - 16;
+    const ciphertext = encBytes.slice(0, cipherLen);
+    const authTag = encBytes.slice(cipherLen);
+    return { ciphertext, authTag };
   }
 
   /**
@@ -118,30 +228,16 @@ export class WebRatchet {
     ttlMS: number,
     _sessionSecret?: string
   ): Promise<WebEnvelope> {
-    const key = await this.derivePairwiseKey(sender, recipient);
+    const keyBytes = await this.derivePairwiseKeyBytes(sender, recipient);
     const enc = new TextEncoder();
     const data = enc.encode(plaintext);
 
-    const iv = window.crypto.getRandomValues(new Uint8Array(12));
-    const ephemeralKey = window.crypto.getRandomValues(new Uint8Array(32));
+    const iv = getCrypto().getRandomValues(new Uint8Array(12));
+    const ephemeralKey = getCrypto().getRandomValues(new Uint8Array(32));
 
-    const encrypted = await window.crypto.subtle.encrypt(
-      {
-        name: 'AES-GCM',
-        iv: iv,
-        tagLength: 128, // 16 bytes
-      },
-      key,
-      data
-    );
+    const { ciphertext, authTag } = await this.encryptPayload(keyBytes, iv, data);
 
-    // WebCrypto appends the 16-byte tag to the end of ciphertext
-    const encBytes = new Uint8Array(encrypted);
-    const cipherLen = encBytes.length - 16;
-    const ciphertextBytes = encBytes.slice(0, cipherLen);
-    const tagBytes = encBytes.slice(cipherLen);
-
-    const uuid = crypto.randomUUID();
+    const uuid = getCrypto().randomUUID ? getCrypto().randomUUID() : 'msg-' + Math.random().toString(36).substring(2, 15);
 
     return {
       id: uuid,
@@ -151,8 +247,8 @@ export class WebRatchet {
       ratchet_seq: 1,
       chain_seq: 1,
       iv: uint8ArrayToBase64(iv),
-      ciphertext: uint8ArrayToBase64(ciphertextBytes),
-      auth_tag: uint8ArrayToBase64(tagBytes),
+      ciphertext: uint8ArrayToBase64(ciphertext),
+      auth_tag: uint8ArrayToBase64(authTag),
       ttl_ms: ttlMS,
       timestamp_ms: Date.now(),
     };
@@ -163,27 +259,13 @@ export class WebRatchet {
    * ZERO-DOWNGRADE: Rejects messages not encrypted with this conversation's pairwise key.
    */
   static async decryptMessage(env: WebEnvelope, _sessionSecret?: string): Promise<string> {
-    const key = await this.derivePairwiseKey(env.sender_id, env.recipient_id);
+    const keyBytes = await this.derivePairwiseKeyBytes(env.sender_id, env.recipient_id);
 
     const ivBytes = base64ToUint8Array(env.iv);
     const cipherBytes = base64ToUint8Array(env.ciphertext);
     const tagBytes = base64ToUint8Array(env.auth_tag);
 
-    // Combine ciphertext and tag for WebCrypto
-    const combined = new Uint8Array(cipherBytes.length + tagBytes.length);
-    combined.set(cipherBytes, 0);
-    combined.set(tagBytes, cipherBytes.length);
-
-    const decrypted = await window.crypto.subtle.decrypt(
-      {
-        name: 'AES-GCM',
-        iv: ivBytes as any,
-        tagLength: 128,
-      },
-      key,
-      combined as any
-    );
-
+    const decrypted = await this.decryptPayload(keyBytes, ivBytes, cipherBytes, tagBytes);
     const dec = new TextDecoder();
     return dec.decode(decrypted);
   }

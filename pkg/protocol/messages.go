@@ -8,6 +8,9 @@ const (
 	OpDeliverEnvelope  StreamOp = "DELIVER_ENVELOPE"
 	OpAckDelivered     StreamOp = "ACK_DELIVERED"
 	OpAckRead          StreamOp = "ACK_READ"
+	OpNack             StreamOp = "NACK"
+	OpTyping           StreamOp = "TYPING"
+	OpSync             StreamOp = "SYNC"
 	OpHeartbeat        StreamOp = "HEARTBEAT"
 	OpUpdatePresence   StreamOp = "UPDATE_PRESENCE"
 	OpZonePresence     StreamOp = "ZONE_PRESENCE"
@@ -20,8 +23,18 @@ type StreamFrame struct {
 	SessionID    string           `json:"session_id,omitempty"`
 	Envelope     *Envelope        `json:"envelope,omitempty"`
 	AckMessageID string           `json:"ack_message_id,omitempty"`
+	NackReason   string           `json:"nack_reason,omitempty"`
+	LastSeenID   string           `json:"last_seen_id,omitempty"`
 	Presence     *PresencePayload `json:"presence,omitempty"`
+	Typing       *TypingPayload   `json:"typing,omitempty"`
 	Error        string           `json:"error,omitempty"`
+}
+
+// TypingPayload represents real-time typing indicators.
+type TypingPayload struct {
+	SenderID    string `json:"sender_id"`
+	RecipientID string `json:"recipient_id"`
+	IsTyping    bool   `json:"is_typing"`
 }
 
 // PresencePayload contains spatial presence data with privacy switch flags.

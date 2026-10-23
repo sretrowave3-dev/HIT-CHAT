@@ -12,7 +12,6 @@ import (
 	"os"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 	"github.com/hit-chat/campusnet/internal/crypto"
@@ -449,37 +448,60 @@ func RunListen(serverURL, listenUser, format string, autoBurn bool) error {
 				msgBody := ""
 				if dErr == nil {
 					msgBody = SanitizeTerminalString(string(plaintext))
-				} else if utf8.Valid(env.Ciphertext) {
-					msgBody = SanitizeTerminalString(string(env.Ciphertext))
 				} else {
-					msgBody = fmt.Sprintf("[E2EE Encrypted Payload: %d bytes]", len(env.Ciphertext))
+					msgBody = "[Cannot decrypt (tap to retry / re-key)]"
 				}
 				cleanSender := SanitizeTerminalString(env.SenderID)
 
 				if format == "json" {
 					jsonBytes, _ := json.Marshal(map[string]interface{}{
-						"id":        env.ID,
-						"sender":    cleanSender,
-						"recipient": env.RecipientID,
-						"text":      msgBody,
-						"ttl_ms":    env.TTLMilliseconds,
-						"timestamp": env.TimestampMS,
+						"id":         env.ID,
+						"sender":     cleanSender,
+						"recipient":  env.RecipientID,
+						"text":       msgBody,
+						"ttl_ms":     env.TTLMilliseconds,
+						"timestamp":  env.TimestampMS,
+						"decrypt_ok": dErr == nil,
 					})
 					fmt.Println(string(jsonBytes))
 				} else {
-					fmt.Fprintf(os.Stdout, "[MSG from @%s | TTL: %dms] %s\n",
-						cleanSender, env.TTLMilliseconds, msgBody)
+					if dErr == nil {
+						fmt.Fprintf(os.Stdout, "[MSG from @%s | TTL: %dms] %s\n",
+							cleanSender, env.TTLMilliseconds, msgBody)
+					} else {
+						fmt.Fprintf(os.Stderr, "[ERROR from @%s | Cannot decrypt msg %s: %v]\n",
+							cleanSender, env.ID, dErr)
+					}
 				}
 				_ = os.Stdout.Sync()
 
-				if autoBurn {
-					// Send ACK_READ immediately to trigger cryptographic burn
-					burnFrame := protocol.StreamFrame{
-						Op:           protocol.OpAckRead,
+				if dErr != nil {
+					// SEND NACK! NEVER burn on failed decrypt!
+					nackFrame := protocol.StreamFrame{
+						Op:           protocol.OpNack,
+						AckMessageID: env.ID,
+						NackReason:   "DECRYPT_FAILED: " + dErr.Error(),
+					}
+					nBytes, _ := json.Marshal(nackFrame)
+					_ = conn.WriteMessage(websocket.TextMessage, nBytes)
+				} else {
+					// Recipient successfully decrypted -> send ACK_DELIVERED
+					ackDelivered := protocol.StreamFrame{
+						Op:           protocol.OpAckDelivered,
 						AckMessageID: env.ID,
 					}
-					bBytes, _ := json.Marshal(burnFrame)
-					_ = conn.WriteMessage(websocket.TextMessage, bBytes)
+					aBytes, _ := json.Marshal(ackDelivered)
+					_ = conn.WriteMessage(websocket.TextMessage, aBytes)
+
+					if autoBurn {
+						// Send ACK_READ strictly after successful display
+						burnFrame := protocol.StreamFrame{
+							Op:           protocol.OpAckRead,
+							AckMessageID: env.ID,
+						}
+						bBytes, _ := json.Marshal(burnFrame)
+						_ = conn.WriteMessage(websocket.TextMessage, bBytes)
+					}
 				}
 			}
 		}

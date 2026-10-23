@@ -12,6 +12,8 @@ import {
   IconLock,
 } from './PosterMotifs.tsx';
 
+export type MessageStatus = 'SENDING' | 'SENT' | 'DELIVERED' | 'READ' | 'FAILED' | 'BURNED';
+
 export interface DisplayMessage {
   id: string;
   sender: string;
@@ -20,14 +22,20 @@ export interface DisplayMessage {
   timestampMS: number;
   ttlMS: number;
   isBurning?: boolean;
+  status?: MessageStatus;
+  isDecryptError?: boolean;
+  rawEnvelope?: any;
 }
 
 interface ChatFeedProps {
   currentContact: string;
   currentUser: string;
   messages: DisplayMessage[];
+  isPeerTyping?: boolean;
   onSendMessage: (text: string, ttlMS: number) => void;
   onBurnMessage: (id: string) => void;
+  onRetryDecrypt?: (msg: DisplayMessage) => void;
+  onTyping?: (isTyping: boolean) => void;
 }
 
 // Bouncing letters for GUPSHUP headline
@@ -233,13 +241,17 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
   currentContact,
   currentUser,
   messages,
+  isPeerTyping,
   onSendMessage,
   onBurnMessage,
+  onRetryDecrypt,
+  onTyping,
 }) => {
   const [inputText, setInputText] = useState('');
   const [ttlMS, setTtlMS] = useState(10000); // 10s default
   const [showSendBurst, setShowSendBurst] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const typingTimeoutRef = useRef<any>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -249,9 +261,21 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
     scrollToBottom();
   }, [messages.length]);
 
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputText(e.target.value);
+    if (onTyping) {
+      onTyping(true);
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        onTyping(false);
+      }, 1500);
+    }
+  };
+
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim()) return;
+    if (onTyping) onTyping(false);
     onSendMessage(inputText.trim(), ttlMS);
     setInputText('');
     setShowSendBurst(true);
@@ -346,7 +370,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
 
               {/* Small Devanagari Subtitle */}
               <p className="font-yatra text-base text-poster-red mt-1 font-bold">
-                शून्य-स्मृति सुरक्षित संवाद
+                à¤¶à¥‚à¤¨à¥à¤¯-à¤¸à¥à¤®à¥ƒà¤¤à¤¿ à¤¸à¥à¤°à¤•à¥à¤·à¤¿à¤¤ à¤¸à¤‚à¤µà¤¾à¤¦
               </p>
 
               {/* Description */}
@@ -441,9 +465,25 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                   >
                     {/* Header */}
                     <div className="flex items-center justify-between gap-4 pb-1.5 mb-2 border-b border-poster-ink">
-                      <span className="font-mono text-xs font-bold uppercase text-poster-ink tracking-wide">
-                        {isMe ? 'YOU' : msg.sender}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-bold uppercase text-poster-ink tracking-wide">
+                          {isMe ? 'YOU' : msg.sender}
+                        </span>
+                        {isMe && msg.status && (
+                          <span className={`font-mono text-[10px] font-bold px-1 rounded-sm ${
+                            msg.status === 'READ' ? 'text-poster-green bg-poster-green/10' :
+                            msg.status === 'DELIVERED' ? 'text-poster-ink bg-poster-yellow/40' :
+                            msg.status === 'FAILED' ? 'text-poster-red bg-poster-red/20' :
+                            'text-poster-ink/60'
+                          }`}>
+                            {msg.status === 'READ' ? '✓✓ READ' :
+                             msg.status === 'DELIVERED' ? '✓✓ DELIVERED' :
+                             msg.status === 'SENT' ? '✓ SENT' :
+                             msg.status === 'FAILED' ? '⚠ FAILED' :
+                             '… SENDING'}
+                          </span>
+                        )}
+                      </div>
                       <span className="font-mono text-[10px] text-poster-ink font-semibold">
                         {new Date(msg.timestampMS > 0 ? msg.timestampMS : Date.now()).toLocaleTimeString(
                           [],
@@ -457,17 +497,44 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                     </div>
 
                     {/* Message Content: Min 15px, Ink Text, WCAG AA Contrast */}
-                    <p className="font-body text-[15px] sm:text-base text-poster-ink leading-relaxed whitespace-pre-wrap select-text font-normal">
-                      {msg.plaintext}
-                    </p>
+                    {msg.isDecryptError ? (
+                      <div className="p-3 bg-poster-red/15 border-2 border-poster-red rounded-[12px_4px_12px_4px] my-1">
+                        <div className="flex items-center gap-1.5 text-poster-deepred font-mono text-xs font-bold uppercase mb-1">
+                          <IconLock size={13} />
+                          <span>Cannot decrypt (re-key required)</span>
+                        </div>
+                        <p className="font-mono text-xs text-poster-ink mb-2">
+                          Message payload could not be decrypted. Never auto-burned.
+                        </p>
+                        {onRetryDecrypt && (
+                          <button
+                            type="button"
+                            onClick={() => onRetryDecrypt(msg)}
+                            className="poster-btn px-3 py-1 bg-poster-mustard hover:bg-poster-yellow text-poster-ink font-mono text-[11px] font-bold uppercase border border-poster-ink shadow-hard-sm cursor-pointer"
+                          >
+                            TAP TO RETRY / RE-KEY
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="font-body text-[15px] sm:text-base text-poster-ink leading-relaxed whitespace-pre-wrap select-text font-normal">
+                        {msg.plaintext}
+                      </p>
+                    )}
 
                     {/* Segmented Burn Timer Footer */}
                     <div className="flex items-center justify-between gap-4 mt-3 pt-2 border-t border-poster-ink">
-                      <CountdownTimer
-                        timestampMS={msg.timestampMS}
-                        ttlMS={msg.ttlMS}
-                        onExpire={() => onBurnMessage(msg.id)}
-                      />
+                      {!msg.isDecryptError ? (
+                        <CountdownTimer
+                          timestampMS={msg.timestampMS}
+                          ttlMS={msg.ttlMS}
+                          onExpire={() => onBurnMessage(msg.id)}
+                        />
+                      ) : (
+                        <span className="font-mono text-[10px] font-bold uppercase text-poster-deepred">
+                          PERSISTED UNTIL TTL / NEVER AUTO-BURNED
+                        </span>
+                      )}
 
                       <button
                         type="button"
@@ -483,6 +550,15 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
               );
             })}
           </AnimatePresence>
+        )}
+        {/* Peer Typing Indicator in Feed */}
+        {isPeerTyping && (
+          <div className="flex items-center gap-2 p-2 bg-white/80 border border-poster-ink rounded-[8px_2px_8px_2px] w-fit shadow-hard-sm">
+            <PetalTypingIndicator />
+            <span className="font-mono text-xs font-bold text-poster-ink uppercase">
+              {currentContact} is typing…
+            </span>
+          </div>
         )}
         <div ref={messagesEndRef} />
       </div>
@@ -504,7 +580,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
             type="text"
             placeholder="Type an ephemeral message…"
             value={inputText}
-            onChange={e => setInputText(e.target.value)}
+            onChange={handleInputChange}
             className="w-full bg-white border-2 border-poster-ink text-poster-ink font-body text-[15px] px-3.5 py-2.5 shadow-hard-sm focus:outline-none focus:bg-poster-cream rounded-[16px_4px_16px_4px] placeholder:text-poster-ink/50"
           />
         </div>

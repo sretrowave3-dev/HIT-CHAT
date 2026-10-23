@@ -1,0 +1,154 @@
+{
+  "handle_normalization": [
+    {
+      "input": "@student_guest",
+      "expected": "guest"
+    },
+    {
+      "input": "@bob",
+      "expected": "bob"
+    },
+    {
+      "input": "STUDENT_ALICE",
+      "expected": "alice"
+    },
+    {
+      "input": "  @carol  ",
+      "expected": "carol"
+    },
+    {
+      "input": "guest",
+      "expected": "guest"
+    },
+    {
+      "input": "study_group",
+      "expected": "study_group"
+    },
+    {
+      "input": "@STUDENT_BOB",
+      "expected": "bob"
+    },
+    {
+      "input": "campus_dev",
+      "expected": "campus_dev"
+    },
+    {
+      "input": "alice",
+      "expected": "alice"
+    }
+  ],
+  "pairwise_kdf": [
+    {
+      "user1": "student_guest",
+      "user2": "alice",
+      "normalized1": "guest",
+      "normalized2": "alice",
+      "info_string": "CampusNet-v1-Pairwise:5:alice:5:guest",
+      "derived_key_hex": "6f5ff0716d0954a05f2630f8c50d0579110acaa25d3124ae494606f4dfd537cf"
+    },
+    {
+      "user1": "alice",
+      "user2": "bob",
+      "normalized1": "alice",
+      "normalized2": "bob",
+      "info_string": "CampusNet-v1-Pairwise:5:alice:3:bob",
+      "derived_key_hex": "a9041177093834352c0f88a8bcedccfdc52af6bc7ade56e312cbabb8241b4fff"
+    },
+    {
+      "user1": "carol",
+      "user2": "student_alice",
+      "normalized1": "carol",
+      "normalized2": "alice",
+      "info_string": "CampusNet-v1-Pairwise:5:alice:5:carol",
+      "derived_key_hex": "49ef5115e3a2802eb5385b9acfdcf0ec63d188315f04e8de07f562ca9245c4fc"
+    },
+    {
+      "user1": "@bob",
+      "user2": "@carol",
+      "normalized1": "bob",
+      "normalized2": "carol",
+      "info_string": "CampusNet-v1-Pairwise:3:bob:5:carol",
+      "derived_key_hex": "429052d08deb48f1b957034f17896c0bf1ba62e2db8306c0ea7e98931cc5f10e"
+    },
+    {
+      "user1": "study_group",
+      "user2": "alice",
+      "normalized1": "study_group",
+      "normalized2": "alice",
+      "info_string": "CampusNet-v1-Pairwise:5:alice:11:study_group",
+      "derived_key_hex": "12637ade5b60b4597451a912d8e92af1d03fa1b19a1d3bd8a93231555d787409"
+    }
+  ],
+  "x3dh": {
+    "alice_ik_priv_hex": "0a0d101316191c1f2225282b2e3134373a3d404346494c4f5255585b5e616467",
+    "alice_ik_pub_hex": "e52ead807a337b9dc45945a5dfd1c3a4c37af395d5758501d675afefb66dd86e",
+    "alice_ek_priv_hex": "14171a1d202326292c2f3235383b3e4144474a4d505356595c5f6265686b6e71",
+    "alice_ek_pub_hex": "14417c477589ceebad172a8208b580ebd85711ffc3810f6ae13e039711e73354",
+    "bob_ik_priv_hex": "1e2124272a2d303336393c3f4245484b4e5154575a5d606366696c6f7275787b",
+    "bob_ik_pub_hex": "c8b8204f7abd476fa8f2f9a824491ff24982b04d5e055d2f93fa4d1df7429673",
+    "bob_spk_priv_hex": "282b2e3134373a3d404346494c4f5255585b5e6164676a6d707376797c7f8285",
+    "bob_spk_pub_hex": "d7218efa19bf99aa6cdbbe23dac3acfdbe4d08440f3b7d7bf3d1daa39e5cd629",
+    "bob_opk_priv_hex": "3235383b3e4144474a4d505356595c5f6265686b6e7174777a7d808386898c8f",
+    "bob_opk_pub_hex": "80880ba190ba5054d7e879c6c231a5fb04f97581c6f07d41b1aeb711a3c90f54",
+    "bob_sign_priv_hex": "3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b1ddbf1f4c8babfde21bb2191780672e7d36ca5ea7d2ffc3c9d3692ad46f0baf1",
+    "bob_sign_pub_hex": "1ddbf1f4c8babfde21bb2191780672e7d36ca5ea7d2ffc3c9d3692ad46f0baf1",
+    "bob_spk_sig_hex": "b59202f10422b0ba6a48f86f10bd8c72371f0bcabe90bcddeb5d5b1df4e16172704b71805d4ba78680e05dee0c258223e74509fa9b8052e471cf6880a5a86202",
+    "master_shared_key_hex": "76a00f500a2fa66914583360561b6acc725a792b42e4f34ba14cb27f2b417d73"
+  },
+  "aead": {
+    "key_hex": "6f5ff0716d0954a05f2630f8c50d0579110acaa25d3124ae494606f4dfd537cf",
+    "iv_b64": "CgsMDQ4PEBESExQV",
+    "plaintext": "Hello Alice. Confidential ephemeral notes for Lab 4.",
+    "aad": "alice:student_guest:context_v1",
+    "ciphertext_b64": "ssPSlEfUM0HpCTNIhwML6I9fVPdPliUiBsQpIfBjMHti+MVm4f/EMi8Hc230YrudVRVPbg==",
+    "auth_tag_b64": "i5mPEtPyOyMezIML+mLadw=="
+  },
+  "ratchet_kdf_chain": [
+    {
+      "step": 0,
+      "chain_key_in_hex": "76a00f500a2fa66914583360561b6acc725a792b42e4f34ba14cb27f2b417d73",
+      "next_ck_hex": "9c52950ccebeebf47cd110d024b07f1a99b32e2a4806900389a66939cdf300c7",
+      "message_key_hex": "e2b9817abcb3f535ece5424a007b548e0052d51b58a4d83f8b43013fa0301405"
+    },
+    {
+      "step": 1,
+      "chain_key_in_hex": "9c52950ccebeebf47cd110d024b07f1a99b32e2a4806900389a66939cdf300c7",
+      "next_ck_hex": "dceb736526bb805109a9bdbdeba62eb08eb31694ebb9d1c07c11b8ee17e8e89c",
+      "message_key_hex": "d49905a99eab6ab39ed44866868b7691e837475d9078224a6afb7ddd7d1e0507"
+    },
+    {
+      "step": 2,
+      "chain_key_in_hex": "dceb736526bb805109a9bdbdeba62eb08eb31694ebb9d1c07c11b8ee17e8e89c",
+      "next_ck_hex": "da341a696a2680169fc11142ce6cc4eac671938d1a7c3f281cc0747310c00889",
+      "message_key_hex": "9dd395be3890af008b81e3bde25e5634b5edf5e07e2631885b9900402df50de6"
+    },
+    {
+      "step": 3,
+      "chain_key_in_hex": "da341a696a2680169fc11142ce6cc4eac671938d1a7c3f281cc0747310c00889",
+      "next_ck_hex": "789ae6abc49f4d27a583c6b129d0d1ddcfe6d2f241a7f944ef39ab1a6eb6b17d",
+      "message_key_hex": "7205ddf187fc573ea514d493aa69bd150ced3965e9cf1e489062aacbbf3ac20a"
+    },
+    {
+      "step": 4,
+      "chain_key_in_hex": "789ae6abc49f4d27a583c6b129d0d1ddcfe6d2f241a7f944ef39ab1a6eb6b17d",
+      "next_ck_hex": "2c45a07b336dbffe3143e8dfe1cfce8048e7a0828d0d5ec77ef3df295a48ea2a",
+      "message_key_hex": "902a6fbcb40b079a1b3a2b63494b137888eeb36c3c8a9fc65cc89daae0c375f5"
+    }
+  ],
+  "envelope_wire": {
+    "envelope": {
+      "id": "11111111-2222-3333-4444-555555555555",
+      "recipient_id": "bob",
+      "sender_id": "alice",
+      "ratchet_seq": 0,
+      "chain_seq": 0,
+      "ttl_ms": 10000,
+      "timestamp_ms": 1729680000000,
+      "ephemeral_public_key": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+      "iv": "AQIDBAUGBwgJCgsM",
+      "ciphertext": "ZW5jcnlwdGVkX3Rlc3RfcGF5bG9hZF9ieXRlc18zMmI=",
+      "auth_tag": "EA8ODQwLCgkIBwYFBAMCAQ=="
+    },
+    "wire_json": "{\"id\":\"11111111-2222-3333-4444-555555555555\",\"recipient_id\":\"bob\",\"sender_id\":\"alice\",\"ratchet_seq\":0,\"chain_seq\":0,\"ttl_ms\":10000,\"timestamp_ms\":1729680000000,\"ephemeral_public_key\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=\",\"iv\":\"AQIDBAUGBwgJCgsM\",\"ciphertext\":\"ZW5jcnlwdGVkX3Rlc3RfcGF5bG9hZF9ieXRlc18zMmI=\",\"auth_tag\":\"EA8ODQwLCgkIBwYFBAMCAQ==\"}"
+  }
+}

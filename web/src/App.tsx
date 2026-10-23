@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { ChatFeed, DisplayMessage } from './components/ChatFeed.tsx';
 import { DevicePairing } from './components/DevicePairing.tsx';
 import { PrivacyInfoModal } from './components/PresenceBadge.tsx';
+import { DiagnosticsModal } from './components/DiagnosticsModal.tsx';
 import { WebKeyStore } from './crypto/keys.ts';
 import { WebRatchet, WebEnvelope, canonicalHandle } from './crypto/ratchet.ts';
 import { useWebSocket } from './hooks/useWebSocket.ts';
@@ -97,28 +98,75 @@ export const App: React.FC = () => {
         plaintext: 'Hello Alice. Encrypted study notes for Lab 4 are ready.',
         timestampMS: now - 3000,
         ttlMS: 30000,
+        status: 'DELIVERED',
       },
     ]);
   }, [currentUser, keyStore]);
 
+  const seenEnvelopeIds = useRef<Set<string>>(new Set(['msg-init-1']));
+  const [lastAckedId, setLastAckedId] = useState<string>('none');
+  const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
+
+  const handleBurn = useCallback((messageId: string) => {
+    setMessages(prev => prev.filter(m => m.id !== messageId));
+  }, []);
+
+  const handleAckDelivered = useCallback((messageId: string) => {
+    setLastAckedId(messageId);
+    setMessages(prev =>
+      prev.map(m => (m.id === messageId && m.status !== 'READ' ? { ...m, status: 'DELIVERED' } : m))
+    );
+  }, []);
+
+  const handleAckRead = useCallback((messageId: string) => {
+    setLastAckedId(messageId);
+    setMessages(prev =>
+      prev.map(m => (m.id === messageId ? { ...m, status: 'READ' } : m))
+    );
+  }, []);
+
+  const handleNack = useCallback((messageId: string, reason: string) => {
+    console.warn(`[NACK received for message ${messageId}]: ${reason}`);
+    setMessages(prev =>
+      prev.map(m => (m.id === messageId ? { ...m, status: 'FAILED' } : m))
+    );
+  }, []);
+
+  const [peerTypingMap, setPeerTypingMap] = useState<Record<string, boolean>>({});
+
+  const handleTypingNotification = useCallback((senderId: string, isTyping: boolean) => {
+    setPeerTypingMap(prev => ({ ...prev, [senderId]: isTyping }));
+  }, []);
+
+  const wsOptions = useMemo(
+    () => ({
+      onBurn: handleBurn,
+      onAckDelivered: handleAckDelivered,
+      onAckRead: handleAckRead,
+      onNack: handleNack,
+      onTyping: handleTypingNotification,
+    }),
+    [handleBurn, handleAckDelivered, handleAckRead, handleNack, handleTypingNotification]
+  );
+
+  const {
+    isConnected,
+    outboxLength,
+    sendEnvelope,
+    ackDelivered,
+    ackRead,
+    sendNack,
+    sendTyping,
+    updatePresence,
+  } = useWebSocket(token, wsOptions);
+
   const handleIncomingEnvelope = useCallback(
     async (incomingEnvelope: WebEnvelope) => {
-      let plaintext = '';
-      try {
-        const fallbackSecret = 'CampusNet_Ratchet_Shared_Demo_Secret';
-        plaintext = await WebRatchet.decryptWithPairwiseFallback(incomingEnvelope, fallbackSecret);
-      } catch {
-        try {
-          const decoded = atob(incomingEnvelope.ciphertext);
-          if (/^[\x20-\x7E\s\u00A0-\uFFFF]*$/.test(decoded) && decoded.length > 0) {
-            plaintext = decoded;
-          } else {
-            plaintext = '[Encrypted Ephemeral Message]';
-          }
-        } catch {
-          plaintext = incomingEnvelope.ciphertext;
-        }
+      // 1. DEDUPLICATE BEFORE DECRYPTION
+      if (seenEnvelopeIds.current.has(incomingEnvelope.id)) {
+        return;
       }
+      seenEnvelopeIds.current.add(incomingEnvelope.id);
 
       const senderTag = incomingEnvelope.sender_id.startsWith('@')
         ? incomingEnvelope.sender_id
@@ -133,12 +181,33 @@ export const App: React.FC = () => {
         return prev;
       });
 
+      let plaintext = '';
+      let isDecryptError = false;
+
+      try {
+        plaintext = await WebRatchet.decryptMessage(incomingEnvelope);
+        // Successful decrypt: notify sender with ACK_DELIVERED
+        ackDelivered(incomingEnvelope.id);
+      } catch (err: any) {
+        console.warn('[Decryption failed for envelope]', incomingEnvelope.id, err);
+        // FAILED DECRYPT:
+        // 1. NEVER trigger OpAckRead!
+        // 2. Send OpNack with error details to server!
+        sendNack(incomingEnvelope.id, 'DECRYPT_FAILED: ' + (err?.message || 'Decryption error'));
+        isDecryptError = true;
+        plaintext = 'Cannot decrypt (tap to retry / re-key)';
+      }
+
       // Track unread if not currently looking at this sender
-      if (canonicalHandle(currentContact) !== canonicalHandle(senderTag)) {
+      const isViewing = canonicalHandle(currentContact) === canonicalHandle(senderTag);
+      if (!isViewing) {
         setUnreadCounts(prev => ({
           ...prev,
           [senderTag]: (prev[senderTag] || 0) + 1,
         }));
+      } else if (!isDecryptError) {
+        // Automatically send read receipt if actively viewing
+        ackRead(incomingEnvelope.id);
       }
 
       setMessages(prev => {
@@ -151,29 +220,41 @@ export const App: React.FC = () => {
             id: incomingEnvelope.id,
             sender: senderTag,
             recipient: currentUser,
-            plaintext: plaintext || '[Encrypted Ephemeral Message]',
+            plaintext: plaintext,
             timestampMS: incomingEnvelope.timestamp_ms || Date.now(),
             ttlMS: incomingEnvelope.ttl_ms || 15000,
+            status: isDecryptError ? 'FAILED' : 'DELIVERED',
+            isDecryptError: isDecryptError,
+            rawEnvelope: incomingEnvelope,
           },
         ];
       });
     },
-    [currentContact, currentUser]
+    [currentContact, currentUser, ackDelivered, ackRead, sendNack]
   );
 
-  const handleBurn = useCallback((messageId: string) => {
-    setMessages(prev => prev.filter(m => m.id !== messageId));
-  }, []);
+  // Bind onEnvelope to websocket handler
+  useEffect(() => {
+    (wsOptions as any).onEnvelope = handleIncomingEnvelope;
+  }, [wsOptions, handleIncomingEnvelope]);
 
-  const wsOptions = useMemo(
-    () => ({
-      onEnvelope: handleIncomingEnvelope,
-      onBurn: handleBurn,
-    }),
-    [handleIncomingEnvelope, handleBurn]
-  );
-
-  const { isConnected, sendEnvelope, ackRead, updatePresence } = useWebSocket(token, wsOptions);
+  const handleRetryDecrypt = useCallback(async (msg: DisplayMessage) => {
+    if (!msg.rawEnvelope) return;
+    try {
+      const decrypted = await WebRatchet.decryptMessage(msg.rawEnvelope);
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === msg.id
+            ? { ...m, plaintext: decrypted, isDecryptError: false, status: 'DELIVERED' }
+            : m
+        )
+      );
+      ackDelivered(msg.id);
+      ackRead(msg.id);
+    } catch (err: any) {
+      alert('Retry failed: ' + (err?.message || 'Decryption error'));
+    }
+  }, [ackDelivered, ackRead]);
 
   const handleAddContact = () => {
     const raw = newContactInput.trim();
@@ -204,7 +285,9 @@ export const App: React.FC = () => {
       plaintext: text,
       timestampMS: env.timestamp_ms,
       ttlMS: env.ttl_ms,
+      status: 'SENDING',
     };
+    seenEnvelopeIds.current.add(env.id);
     setMessages(prev => [...prev, newMessage]);
 
     // Dispatch envelope over WebSocket
@@ -263,29 +346,29 @@ export const App: React.FC = () => {
       {/* Slow-Scrolling Marquee Ticker in Header Strip */}
       <div className="marquee-container bg-poster-ink text-poster-cream py-1 px-2 border-2 border-poster-ink mb-3 shadow-hard-sm z-10 cursor-default">
         <div className="marquee-content font-mono text-[11px] font-bold tracking-widest uppercase flex items-center gap-6">
-          <span>★ BURN ON READ</span>
-          <span>•</span>
+          <span>â˜… BURN ON READ</span>
+          <span>â€¢</span>
           <span>ZERO-KNOWLEDGE RAM ONLY</span>
-          <span>•</span>
+          <span>â€¢</span>
           <span>END-TO-END ENCRYPTED</span>
-          <span>•</span>
+          <span>â€¢</span>
           <span>NO PERSISTENT DISK LOGS</span>
-          <span>•</span>
+          <span>â€¢</span>
           <span>PAIRWISE HKDF RATIO</span>
-          <span>•</span>
-          <span>AUTOMATIC EPHEMERAL PURGE ★</span>
+          <span>â€¢</span>
+          <span>AUTOMATIC EPHEMERAL PURGE â˜…</span>
           <span className="mx-4">|</span>
-          <span>★ BURN ON READ</span>
-          <span>•</span>
+          <span>â˜… BURN ON READ</span>
+          <span>â€¢</span>
           <span>ZERO-KNOWLEDGE RAM ONLY</span>
-          <span>•</span>
+          <span>â€¢</span>
           <span>END-TO-END ENCRYPTED</span>
-          <span>•</span>
+          <span>â€¢</span>
           <span>NO PERSISTENT DISK LOGS</span>
-          <span>•</span>
+          <span>â€¢</span>
           <span>PAIRWISE HKDF RATIO</span>
-          <span>•</span>
-          <span>AUTOMATIC EPHEMERAL PURGE ★</span>
+          <span>â€¢</span>
+          <span>AUTOMATIC EPHEMERAL PURGE â˜…</span>
         </div>
       </div>
 
@@ -356,6 +439,16 @@ export const App: React.FC = () => {
               PAIR DEVICE
             </motion.button>
 
+            {/* Diagnostics Button */}
+            <motion.button
+              whileTap={{ scale: 0.94 }}
+              type="button"
+              onClick={() => setIsDiagnosticsOpen(true)}
+              className="poster-btn px-3 py-1.5 bg-white hover:bg-poster-yellow text-poster-ink font-bungee text-xs uppercase rounded-[12px_4px_12px_4px] cursor-pointer"
+            >
+              DIAGNOSTICS
+            </motion.button>
+
             {/* Burn All Button */}
             <motion.button
               whileTap={{ scale: 0.94 }}
@@ -381,7 +474,7 @@ export const App: React.FC = () => {
               className="absolute -top-3 right-1 font-yatra text-8xl text-poster-ink opacity-10 select-none pointer-events-none"
               aria-hidden="true"
             >
-              गपशप
+              à¤—à¤ªà¤¶à¤ª
             </span>
 
             {/* Sidebar Title */}
@@ -401,7 +494,7 @@ export const App: React.FC = () => {
             <div className="flex gap-1.5 relative z-10">
               <input
                 type="text"
-                placeholder="ADD @PEER…"
+                placeholder="ADD @PEERâ€¦"
                 value={newContactInput}
                 onChange={e => setNewContactInput(e.target.value)}
                 onKeyDown={e => {
@@ -479,8 +572,11 @@ export const App: React.FC = () => {
                   canonicalHandle(m.recipient) === activeCan
                 );
               })}
+              isPeerTyping={!!peerTypingMap[currentContact] || !!peerTypingMap[canonicalHandle(currentContact)]}
               onSendMessage={handleSendMessage}
               onBurnMessage={handleBurnMessage}
+              onRetryDecrypt={handleRetryDecrypt}
+              onTyping={(isTyping) => sendTyping(currentContact.replace('@', ''), isTyping)}
             />
           </main>
         </div>
@@ -488,9 +584,9 @@ export const App: React.FC = () => {
 
       {/* Draggable Fun Stickers Layer (Can be dragged around with spring physics) */}
       <div className="fixed bottom-4 left-6 z-30 pointer-events-auto hidden sm:flex items-center gap-3">
-        <DraggableSticker motif="chilli" label="तीखा" initialRotate={-8} />
-        <DraggableSticker motif="charm" label="नज़र बट्टू" initialRotate={6} />
-        <DraggableSticker motif="lotus" label="गुफ्तगू" initialRotate={-4} />
+        <DraggableSticker motif="chilli" label="à¤¤à¥€à¤–à¤¾" initialRotate={-8} />
+        <DraggableSticker motif="charm" label="à¤¨à¤œà¤¼à¤° à¤¬à¤Ÿà¥à¤Ÿà¥‚" initialRotate={6} />
+        <DraggableSticker motif="lotus" label="à¤—à¥à¤«à¥à¤¤à¤—à¥‚" initialRotate={-4} />
       </div>
 
       {/* Bottom Corner Meta Labels */}
@@ -515,6 +611,17 @@ export const App: React.FC = () => {
         zoneDisplayName={zoneDisplayName}
         buildingName={buildingName}
         onTogglePrivacy={handleTogglePrivacy}
+      />
+
+      {/* Zero-Knowledge Diagnostic Modal */}
+      <DiagnosticsModal
+        isOpen={isDiagnosticsOpen}
+        onClose={() => setIsDiagnosticsOpen(false)}
+        isConnected={isConnected}
+        currentUser={currentUser}
+        currentContact={currentContact}
+        lastAckedId={lastAckedId}
+        outboxLength={outboxLength}
       />
     </div>
   );

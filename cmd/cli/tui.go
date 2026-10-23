@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -146,12 +145,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			bodyText := ""
 			if dErr == nil {
 				bodyText = SanitizeTerminalString(string(decrypted))
-			} else if utf8.Valid(msg.Ciphertext) {
-				bodyText = SanitizeTerminalString(string(msg.Ciphertext))
 			} else {
-				bodyText = fmt.Sprintf("[Encrypted message: %d bytes]", len(msg.Ciphertext))
+				bodyText = "[Cannot decrypt (tap to retry / re-key)]"
 			}
 			sender = SanitizeTerminalString(sender)
+
+			if dErr != nil && m.wsConn != nil {
+				nackFrame := protocol.StreamFrame{
+					Op:           protocol.OpNack,
+					AckMessageID: msg.ID,
+					NackReason:   "DECRYPT_FAILED: " + dErr.Error(),
+				}
+				nBytes, _ := json.Marshal(nackFrame)
+				_ = m.wsConn.WriteMessage(websocket.TextMessage, nBytes)
+			} else if dErr == nil && m.wsConn != nil {
+				ackDelivered := protocol.StreamFrame{
+					Op:           protocol.OpAckDelivered,
+					AckMessageID: msg.ID,
+				}
+				aBytes, _ := json.Marshal(ackDelivered)
+				_ = m.wsConn.WriteMessage(websocket.TextMessage, aBytes)
+			}
 
 			chatMsg := ChatMessage{
 				ID:        msg.ID,
@@ -432,7 +446,7 @@ func (m model) View() string {
 		}
 	}
 	contactsPane := sidebarStyle.Render(
-		"CAMPUS PEERS\n────────────\n" + strings.Join(contactsList, "\n"),
+		"CAMPUS PEERS\nâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€\n" + strings.Join(contactsList, "\n"),
 	)
 
 	// Chat Messages
@@ -467,7 +481,7 @@ func (m model) View() string {
 	}
 
 	chatPane := chatStyle.Render(
-		fmt.Sprintf("CONVERSATION: %s\n──────────────────────────────────────────────────\n", activeContact) +
+		fmt.Sprintf("CONVERSATION: %s\nâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€\n", activeContact) +
 			strings.Join(msgLines[start:], "\n"),
 	)
 
@@ -476,7 +490,7 @@ func (m model) View() string {
 	// Status & Input
 	statusBar := fmt.Sprintf(" Status: %s", m.statusMessage)
 	inputBox := borderStyle.Width(74).Render(
-		fmt.Sprintf(" [%s] > %s█", activeContact, m.inputBuffer),
+		fmt.Sprintf(" [%s] > %sâ–ˆ", activeContact, m.inputBuffer),
 	)
 	hotkeys := " [Tab] Switch | [Enter] Send | [Ctrl+A] Connect | [Ctrl+P] Loc | [Ctrl+L] Shred | [Esc] Quit"
 
