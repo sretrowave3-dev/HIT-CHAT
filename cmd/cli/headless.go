@@ -432,21 +432,22 @@ func RunListen(serverURL, listenUser, format string, autoBurn bool) error {
 			if frame.Op == protocol.OpDeliverEnvelope && frame.Envelope != nil {
 				env := frame.Envelope
 
-				// Decrypt payload with pairwise isolation (falling back to campus key if needed)
+				// Decrypt payload with pairwise isolation
 				plaintext, dErr := crypto.DecryptPairwisePayload(env.SenderID, userHandle, env.IV, env.Ciphertext, env.AuthTag)
 				msgBody := ""
 				if dErr == nil {
-					msgBody = string(plaintext)
+					msgBody = SanitizeTerminalString(string(plaintext))
 				} else if utf8.Valid(env.Ciphertext) {
-					msgBody = string(env.Ciphertext)
+					msgBody = SanitizeTerminalString(string(env.Ciphertext))
 				} else {
 					msgBody = fmt.Sprintf("[E2EE Encrypted Payload: %d bytes]", len(env.Ciphertext))
 				}
+				cleanSender := SanitizeTerminalString(env.SenderID)
 
 				if format == "json" {
 					jsonBytes, _ := json.Marshal(map[string]interface{}{
 						"id":        env.ID,
-						"sender":    env.SenderID,
+						"sender":    cleanSender,
 						"recipient": env.RecipientID,
 						"text":      msgBody,
 						"ttl_ms":    env.TTLMilliseconds,
@@ -455,7 +456,7 @@ func RunListen(serverURL, listenUser, format string, autoBurn bool) error {
 					fmt.Println(string(jsonBytes))
 				} else {
 					fmt.Fprintf(os.Stdout, "[MSG from @%s | TTL: %dms] %s\n",
-						env.SenderID, env.TTLMilliseconds, msgBody)
+						cleanSender, env.TTLMilliseconds, msgBody)
 				}
 				_ = os.Stdout.Sync()
 

@@ -127,16 +127,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				sender = "@" + sender
 			}
 
-			// Decrypt incoming payload with pairwise key isolation, falling back cleanly
+			// Decrypt incoming payload with pairwise key isolation
 			decrypted, dErr := crypto.DecryptPairwisePayload(msg.SenderID, m.userHandle, msg.IV, msg.Ciphertext, msg.AuthTag)
 			bodyText := ""
 			if dErr == nil {
-				bodyText = string(decrypted)
+				bodyText = SanitizeTerminalString(string(decrypted))
 			} else if utf8.Valid(msg.Ciphertext) {
-				bodyText = string(msg.Ciphertext)
+				bodyText = SanitizeTerminalString(string(msg.Ciphertext))
 			} else {
 				bodyText = fmt.Sprintf("[Encrypted message: %d bytes]", len(msg.Ciphertext))
 			}
+			sender = SanitizeTerminalString(sender)
 
 			chatMsg := ChatMessage{
 				ID:        msg.ID,
