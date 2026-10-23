@@ -1,6 +1,7 @@
 import React from 'react';
+import { motion } from 'framer-motion';
 
-// Motif 1: Hand-built Flat Lotus (2-3 colors: red #C8141A, yellow #F7D63C, ink #2A0A08)
+// Motif 1: Hand-built Flat Lotus (red #D7191F, yellow #F7D63C, green #2E8B3D, ink #2A0A08)
 export const LotusMotif: React.FC<{ className?: string; size?: number }> = ({ className = '', size = 24 }) => (
   <svg
     width={size}
@@ -13,7 +14,7 @@ export const LotusMotif: React.FC<{ className?: string; size?: number }> = ({ cl
     {/* Center petal */}
     <path
       d="M12 2C10 6 9 9 9 13C9 17 12 19 12 19C12 19 15 17 15 13C15 9 14 6 12 2Z"
-      fill="#C8141A"
+      fill="#D7191F"
       stroke="#2A0A08"
       strokeWidth="1.5"
       strokeLinejoin="round"
@@ -34,7 +35,7 @@ export const LotusMotif: React.FC<{ className?: string; size?: number }> = ({ cl
       strokeWidth="1.5"
       strokeLinejoin="round"
     />
-    {/* Lotus base calyx */}
+    {/* Base calyx */}
     <path
       d="M6 19C9 22 15 22 18 19C15 20 9 20 6 19Z"
       fill="#2E8B3D"
@@ -44,7 +45,7 @@ export const LotusMotif: React.FC<{ className?: string; size?: number }> = ({ cl
   </svg>
 );
 
-// Motif 2: Hand-built Flat Chilli (2-3 colors: red #C8141A, green #2E8B3D, ink #2A0A08)
+// Motif 2: Hand-built Flat Chilli (red #D7191F, green #2E8B3D, ink #2A0A08)
 export const ChilliMotif: React.FC<{ className?: string; size?: number }> = ({ className = '', size = 24 }) => (
   <svg
     width={size}
@@ -70,7 +71,7 @@ export const ChilliMotif: React.FC<{ className?: string; size?: number }> = ({ c
     {/* Red Body */}
     <path
       d="M11 6.5C14 7 17 9 17 12C17 15 14 19 9 21C8 21.5 7.5 21 8 20C10 16 12 13 11 6.5Z"
-      fill="#C8141A"
+      fill="#D7191F"
       stroke="#2A0A08"
       strokeWidth="1.5"
       strokeLinejoin="round"
@@ -79,7 +80,7 @@ export const ChilliMotif: React.FC<{ className?: string; size?: number }> = ({ c
 );
 
 // Motif 3: Hand-built Flat Chevron (Truck-art double zigzag accent)
-export const ChevronMotif: React.FC<{ className?: string; size?: number; count?: number }> = ({
+export const ChevronMotif: React.FC<{ className?: string; size?: number }> = ({
   className = '',
   size = 18,
 }) => (
@@ -107,7 +108,7 @@ export const ChevronMotif: React.FC<{ className?: string; size?: number; count?:
     />
     <path
       d="M18 2L26 9L18 16"
-      stroke="#C8141A"
+      stroke="#D7191F"
       strokeWidth="2.5"
       strokeLinecap="square"
       strokeLinejoin="miter"
@@ -115,7 +116,7 @@ export const ChevronMotif: React.FC<{ className?: string; size?: number; count?:
   </svg>
 );
 
-// Motif 4: Four-Point Sparkle (Indian folk/print poster diamond star)
+// Motif 4: Four-Point Diamond Star Sparkle
 export const SparkleMotif: React.FC<{ className?: string; size?: number; color?: string }> = ({
   className = '',
   size = 18,
@@ -139,7 +140,57 @@ export const SparkleMotif: React.FC<{ className?: string; size?: number; color?:
   </svg>
 );
 
-// Plain functional icons drawn in ink with 2px stroke (no icon libraries mixed into theme)
+// Motif 5: Evil-Eye Charm / Talisman (Nazar protection motif with cobalt, cream, yellow, ink)
+export const CharmMotif: React.FC<{ className?: string; size?: number }> = ({ className = '', size = 24 }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    className={`inline-block shrink-0 ${className}`}
+  >
+    {/* Outer eye contour / lashes */}
+    <path
+      d="M2 12C5 7 19 7 22 12C19 17 5 17 2 12Z"
+      fill="#2457E0"
+      stroke="#2A0A08"
+      strokeWidth="1.5"
+    />
+    {/* White / cream inner oval */}
+    <ellipse cx="12" cy="12" rx="6.5" ry="4.5" fill="#F6EACB" stroke="#2A0A08" strokeWidth="1" />
+    {/* Mustard iris */}
+    <circle cx="12" cy="12" r="3" fill="#F7D63C" stroke="#2A0A08" strokeWidth="1" />
+    {/* Dark ink pupil */}
+    <circle cx="12" cy="12" r="1.5" fill="#2A0A08" />
+    {/* Top crown ray */}
+    <path d="M12 4V2M8 5L7 3M16 5L17 3" stroke="#2A0A08" strokeWidth="1.2" strokeLinecap="round" />
+  </svg>
+);
+
+// Motif 6: Paisley / Mango (Ambi / Kairi Indian folk print motif)
+export const PaisleyMotif: React.FC<{ className?: string; size?: number }> = ({ className = '', size = 24 }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    className={`inline-block shrink-0 ${className}`}
+  >
+    <path
+      d="M12 2C8 2 5 6 5 11C5 16 8.5 20 13 20C17.5 20 20 16.5 20 12C20 6.5 14.5 8 13.5 4C13 2.8 12.6 2 12 2Z"
+      fill="#F2A33A"
+      stroke="#2A0A08"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+    />
+    <circle cx="12" cy="13" r="3" fill="#D7191F" stroke="#2A0A08" strokeWidth="1" />
+    <circle cx="12" cy="13" r="1" fill="#F7D63C" />
+  </svg>
+);
+
+// Plain functional icons drawn in ink with 2px stroke (no external icon libraries)
 export const IconSend: React.FC<{ className?: string; size?: number }> = ({ className = '', size = 18 }) => (
   <svg
     width={size}
@@ -244,3 +295,57 @@ export const IconInfo: React.FC<{ className?: string; size?: number }> = ({ clas
     <path d="M12 8H12.01" />
   </svg>
 );
+
+// Interactive Draggable Sticker Component with Spring Physics
+interface DraggableStickerProps {
+  label?: string;
+  motif?: 'lotus' | 'chilli' | 'sparkle' | 'charm' | 'paisley';
+  size?: number;
+  initialRotate?: number;
+  className?: string;
+}
+
+export const DraggableSticker: React.FC<DraggableStickerProps> = ({
+  label,
+  motif = 'lotus',
+  size = 28,
+  initialRotate = 0,
+  className = '',
+}) => {
+  const renderMotif = () => {
+    switch (motif) {
+      case 'lotus':
+        return <LotusMotif size={size} />;
+      case 'chilli':
+        return <ChilliMotif size={size} />;
+      case 'sparkle':
+        return <SparkleMotif size={size} />;
+      case 'charm':
+        return <CharmMotif size={size} />;
+      case 'paisley':
+        return <PaisleyMotif size={size} />;
+      default:
+        return <LotusMotif size={size} />;
+    }
+  };
+
+  return (
+    <motion.div
+      drag
+      dragElastic={0.2}
+      whileHover={{ scale: 1.12, rotate: initialRotate + 4 }}
+      whileTap={{ scale: 0.95 }}
+      transition={{ type: 'spring', stiffness: 400, damping: 20 }}
+      style={{ rotate: initialRotate }}
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border-2 border-poster-ink shadow-hard rounded-[14px_4px_14px_4px] cursor-grab active:cursor-grabbing select-none shrink-0 z-20 ${className}`}
+      title="DRAG ME!"
+    >
+      {renderMotif()}
+      {label && (
+        <span className="font-bungee text-[11px] text-poster-ink uppercase tracking-wider">
+          {label}
+        </span>
+      )}
+    </motion.div>
+  );
+};

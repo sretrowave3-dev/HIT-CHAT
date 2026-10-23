@@ -6,60 +6,119 @@
   body {
     font-family: 'Mukta', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     font-size: 15px;
-    background-color: #C8141A;
+    background-color: #D7191F;
     color: #2A0A08;
     line-height: 1.5;
   }
 }
 
-/* Global grain: subtle inline SVG noise overlay at ~8% opacity over whole app */
+/* Full-viewport fixed grain overlay (18% opacity, fractalNoise, animated steps(6) jitter) */
 .poster-grain-overlay {
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 9999;
-  opacity: 0.08;
+  opacity: 0.18;
   mix-blend-mode: multiply;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 300 300' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  background-size: 300px 300px;
+  animation: grainJitter 0.8s steps(6) infinite;
 }
 
-/* Halftone dot pattern in ONE corner of the layout only (bottom-right) */
-.poster-corner-halftone {
-  position: absolute;
-  bottom: 0;
-  right: 0;
-  width: 180px;
-  height: 180px;
-  pointer-events: none;
+@keyframes grainJitter {
+  0% { background-position: 0 0; }
+  16% { background-position: -4px 3px; }
+  33% { background-position: 5px -2px; }
+  50% { background-position: -3px -5px; }
+  66% { background-position: 4px 4px; }
+  83% { background-position: -2px 2px; }
+  100% { background-position: 0 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .poster-grain-overlay {
+    animation: none;
+  }
+}
+
+/* Second, lighter halftone dot layer (radial-gradient dots, 6px grid) at 10% opacity */
+.poster-halftone-pattern {
   background-image: radial-gradient(#2A0A08 20%, transparent 20%);
   background-position: 0 0;
-  background-size: 10px 10px;
-  opacity: 0.15;
-  mask-image: radial-gradient(circle at bottom right, black 30%, transparent 75%);
-  -webkit-mask-image: radial-gradient(circle at bottom right, black 30%, transparent 75%);
+  background-size: 6px 6px;
+  opacity: 0.10;
+  pointer-events: none;
 }
 
-/* Flat poster button with hard offset shadow and crisp pressed state */
+/* Per-surface paper texture */
+.paper-surface {
+  background-color: #F6EACB;
+  background-image: radial-gradient(rgba(42, 10, 8, 0.04) 1px, transparent 0);
+  background-size: 8px 8px;
+}
+
+/* Flat poster button with hard offset shadow and tactile squish */
 .poster-btn {
   border: 2px solid #2A0A08;
-  box-shadow: 4px 4px 0px #2A0A08;
-  transition: transform 0.06s ease, box-shadow 0.06s ease;
+  box-shadow: 3px 3px 0px #2A0A08;
+  transition: transform 0.08s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.08s ease;
 }
 .poster-btn:active {
-  transform: translate(2px, 2px);
-  box-shadow: 2px 2px 0px #2A0A08;
+  transform: translate(2px, 2px) scale(0.98);
+  box-shadow: 1px 1px 0px #2A0A08;
 }
 
-/* Chunky 3D headline type with hard drop shadow and flat yellow-to-mustard split */
+/* Draggable sticker cut */
+.sticker-paper {
+  background-color: #FFFDF8;
+  border: 2px solid #2A0A08;
+  box-shadow: 3px 3px 0px #2A0A08;
+  user-select: none;
+}
+
+/* Chunky headline with hard drop shadow and flat yellow-to-mustard split */
 .poster-split-title {
   background: linear-gradient(to bottom, #F7D63C 50%, #F2A33A 50%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  filter: drop-shadow(4px 4px 0px #2A0A08);
+  filter: drop-shadow(3px 3px 0px #2A0A08);
 }
 
 .poster-hard-title {
-  text-shadow: 4px 4px 0px #2A0A08;
+  text-shadow: 3px 3px 0px #2A0A08;
+}
+
+/* Infinite slow-scrolling marquee ribbon */
+.marquee-container {
+  display: flex;
+  overflow: hidden;
+  user-select: none;
+  white-space: nowrap;
+}
+.marquee-content {
+  display: flex;
+  flex-shrink: 0;
+  animation: marqueeScroll 28s linear infinite;
+}
+.marquee-container:hover .marquee-content {
+  animation-play-state: paused;
+}
+@keyframes marqueeScroll {
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(-50%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marquee-content {
+    animation: none;
+  }
+}
+
+/* Shutter wipe animation for privacy toggle */
+@keyframes shutterWipe {
+  0% { transform: scaleX(0); }
+  50% { transform: scaleX(1); }
+  100% { transform: scaleX(0); }
 }
 
 /* Flat sharp scrollbars */
@@ -68,7 +127,7 @@
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #F4E7C8;
+  background: #F6EACB;
   border-left: 2px solid #2A0A08;
 }
 ::-webkit-scrollbar-thumb {

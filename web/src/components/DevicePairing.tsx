@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { IconClose } from './PosterMotifs.tsx';
+import { motion, AnimatePresence } from 'framer-motion';
+import { IconClose, SparkleMotif, ChevronMotif } from './PosterMotifs.tsx';
 
 interface DevicePairingProps {
   userHandle: string;
@@ -80,8 +81,6 @@ export const DevicePairing: React.FC<DevicePairingProps> = ({
     }
   };
 
-  if (!isOpen) return null;
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userCode.trim()) return;
@@ -89,114 +88,120 @@ export const DevicePairing: React.FC<DevicePairingProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-poster-ink/75 p-4">
-      <div className="bg-poster-cream border-2 border-poster-ink shadow-hard w-full max-w-md p-6 relative rounded-none">
-        {/* Close Button */}
-        <button
-          type="button"
-          onClick={onClose}
-          className="poster-btn absolute top-4 right-4 p-1.5 bg-white hover:bg-poster-red hover:text-white text-poster-ink"
-          title="CLOSE"
-        >
-          <IconClose size={16} />
-        </button>
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-poster-ink/75 p-4">
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0, y: 15 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.9, opacity: 0, y: 15 }}
+            transition={{ type: 'spring', damping: 22, stiffness: 350 }}
+            className="bg-poster-cream paper-surface border-2 border-poster-ink shadow-hard-lg w-full max-w-md p-6 relative rounded-[28px_8px_28px_8px] overflow-hidden"
+          >
+            {/* Halftone corner pattern */}
+            <div className="absolute top-0 right-0 w-24 h-24 poster-halftone-pattern rounded-tr-[24px]" />
 
-        {/* Header */}
-        <div className="mb-5 pb-3 border-b-2 border-poster-ink">
-          <div className="font-mono text-[10px] font-bold text-poster-deepred uppercase tracking-widest">
-            RFC 8628 / DEVICE FLOW
-          </div>
-          <h3 className="font-bungee text-2xl text-poster-ink tracking-wide mt-0.5">
-            PAIR DEVICE
-          </h3>
-          <p className="font-mono text-xs text-poster-ink uppercase mt-1">
-            LINK TERMINAL SESSION TO @{userHandle.toUpperCase()}
-          </p>
-        </div>
-
-        {/* Pending Terminal Detection Banner */}
-        {pendingDevices.length > 0 && (
-          <div className="p-3 bg-poster-yellow border-2 border-poster-ink shadow-hard-sm mb-5 flex items-center justify-between gap-3">
-            <div>
-              <div className="font-mono text-[11px] font-bold text-poster-ink uppercase">
-                PENDING REQUEST
-              </div>
-              <div className="font-mono text-sm font-bold text-poster-ink mt-0.5">
-                CODE: {pendingDevices[0].user_code}
-              </div>
-            </div>
-            <button
-              type="button"
-              disabled={status === 'authorizing'}
-              onClick={() => handleAutoAuthorize(pendingDevices[0].user_code)}
-              className="poster-btn px-3 py-1.5 bg-poster-mustard hover:bg-white text-poster-ink font-bungee text-xs uppercase"
-            >
-              1-CLICK PAIR
-            </button>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label
-              htmlFor="pairing-code"
-              className="block font-mono text-xs font-bold text-poster-ink uppercase tracking-wider mb-2"
-            >
-              ENTER PAIRING CODE
-            </label>
-            <input
-              id="pairing-code"
-              type="text"
-              placeholder="CNET-XXXX-XXXX"
-              value={userCode}
-              onChange={e => setUserCode(e.target.value)}
-              className="w-full px-4 py-3 bg-white border-2 border-poster-ink text-center font-mono text-base sm:text-lg font-bold tracking-widest uppercase text-poster-ink shadow-hard-sm focus:outline-none focus:bg-poster-cream rounded-none placeholder:text-poster-ink/30"
-            />
-          </div>
-
-          {status === 'error' && (
-            <div className="p-3 bg-poster-red text-white border-2 border-poster-ink font-mono text-xs uppercase font-bold">
-              ERROR: {errorMessage}
-            </div>
-          )}
-
-          {status === 'success' && (
-            <div className="p-3 bg-poster-green text-white border-2 border-poster-ink font-mono text-xs uppercase font-bold">
-              DEVICE LINKED SUCCESSFULLY
-            </div>
-          )}
-
-          <div className="flex gap-3 pt-2">
-            <button
+            {/* Close Button */}
+            <motion.button
+              whileTap={{ scale: 0.92 }}
               type="button"
               onClick={onClose}
-              className="poster-btn flex-1 px-4 py-2.5 bg-white hover:bg-poster-cream text-poster-ink font-mono text-xs uppercase font-bold"
+              className="poster-btn absolute top-4 right-4 p-1.5 bg-white hover:bg-poster-red hover:text-white text-poster-ink rounded-[8px_2px_8px_2px]"
+              title="CLOSE"
             >
-              CANCEL
-            </button>
-            <button
-              type="submit"
-              disabled={status === 'authorizing'}
-              className="poster-btn flex-1 px-4 py-2.5 bg-poster-mustard hover:bg-poster-yellow disabled:opacity-50 text-poster-ink font-bungee text-sm uppercase"
-            >
-              {status === 'authorizing' ? 'VERIFYING…' : 'AUTHORIZE'}
-            </button>
-          </div>
+              <IconClose size={16} />
+            </motion.button>
 
-          {pendingDevices.length === 0 && (
-            <div className="pt-2 text-center border-t border-poster-ink">
-              <button
-                type="button"
-                disabled={status === 'authorizing'}
-                onClick={() => handleAutoAuthorize()}
-                className="font-mono text-xs font-bold text-poster-deepred hover:underline uppercase inline-block py-1"
-              >
-                AUTO-AUTHORIZE LATEST LOCAL TERMINAL
-              </button>
+            {/* Header */}
+            <div className="mb-4 pb-3 border-b-2 border-poster-ink relative z-10">
+              <div className="flex items-center gap-1.5 font-mono text-[10px] font-bold text-poster-deepred uppercase tracking-widest">
+                <SparkleMotif size={12} color="#D7191F" />
+                <span>HARDWARE PROTOCOL / RFC 8628</span>
+              </div>
+              <h3 className="font-bungee text-2xl text-poster-ink tracking-wide mt-1">
+                PAIR CLI TERMINAL
+              </h3>
             </div>
-          )}
-        </form>
-      </div>
-    </div>
+
+            {/* Pending Devices Alert */}
+            {pendingDevices.length > 0 && (
+              <div className="mb-4 p-3 bg-poster-yellow border-2 border-poster-ink rounded-[16px_4px_16px_4px] shadow-hard-sm relative z-10">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-mono text-xs font-bold text-poster-ink uppercase">
+                    CLI PAIRING REQUEST DETECTED:
+                  </span>
+                  <span className="font-mono text-[10px] font-bold bg-poster-green text-poster-cream px-1.5 py-0.5 border border-poster-ink uppercase">
+                    ACTIVE
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 mt-2">
+                  <span className="font-mono text-base font-bold tracking-widest text-poster-ink bg-white px-2.5 py-1 border border-poster-ink rounded-[6px_2px_6px_2px]">
+                    {pendingDevices[0].user_code}
+                  </span>
+                  <motion.button
+                    whileTap={{ scale: 0.95 }}
+                    type="button"
+                    onClick={() => handleAutoAuthorize(pendingDevices[0].user_code)}
+                    disabled={status === 'authorizing'}
+                    className="poster-btn px-3 py-1.5 bg-poster-green text-poster-cream font-bungee text-xs uppercase rounded-[8px_2px_8px_2px]"
+                  >
+                    AUTHORIZE
+                  </motion.button>
+                </div>
+              </div>
+            )}
+
+            {/* Pairing Code Manual Form */}
+            <form onSubmit={handleSubmit} className="space-y-4 relative z-10">
+              <div>
+                <label
+                  htmlFor="user-code-input"
+                  className="block font-mono text-xs font-bold text-poster-ink uppercase mb-1"
+                >
+                  ENTER 8-CHAR USER CODE:
+                </label>
+                <input
+                  id="user-code-input"
+                  type="text"
+                  maxLength={9}
+                  placeholder="ABCD-EFGH"
+                  value={userCode}
+                  onChange={e => setUserCode(e.target.value.toUpperCase())}
+                  className="w-full bg-white border-2 border-poster-ink text-poster-ink font-mono text-lg font-bold text-center tracking-widest px-3 py-2.5 shadow-hard-sm focus:outline-none focus:bg-poster-cream rounded-[16px_4px_16px_4px] placeholder:text-poster-ink/40 uppercase"
+                />
+              </div>
+
+              {/* Status alerts */}
+              {status === 'error' && (
+                <div className="p-2.5 bg-poster-red/20 border-2 border-poster-red text-poster-red font-mono text-xs font-bold uppercase rounded-[8px_2px_8px_2px]">
+                  {errorMessage}
+                </div>
+              )}
+
+              {status === 'success' && (
+                <div className="p-2.5 bg-poster-green/20 border-2 border-poster-green text-poster-green font-mono text-xs font-bold uppercase rounded-[8px_2px_8px_2px]">
+                  CLI TERMINAL LINKED SUCCESSFULLY!
+                </div>
+              )}
+
+              <div className="pt-2">
+                <motion.button
+                  whileTap={{ scale: 0.95 }}
+                  type="submit"
+                  disabled={status === 'authorizing' || !userCode.trim()}
+                  className="poster-btn w-full px-4 py-3 bg-poster-mustard hover:bg-poster-yellow text-poster-ink font-bungee text-xs uppercase rounded-[16px_4px_16px_4px] disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <ChevronMotif size={12} />
+                  <span>
+                    {status === 'authorizing' ? 'LINKING KEYRING…' : 'CONFIRM LINK'}
+                  </span>
+                  <ChevronMotif size={12} className="rotate-180" />
+                </motion.button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
   );
 };
