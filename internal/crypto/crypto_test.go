@@ -372,3 +372,39 @@ func TestSafetyNumberDeterministicAndSymmetric(t *testing.T) {
 		t.Fatalf("safety number collision detected between legitimate Bob and attacker Eve!")
 	}
 }
+
+
+func TestDeriveHybridPQSharedSecret(t *testing.T) {
+	classicalSecret := make([]byte, 32)
+	copy(classicalSecret, []byte("classical_x25519_shared_secret!!"))
+
+	pqSecret := make([]byte, 32)
+	copy(pqSecret, []byte("mlkem768_post_quantum_secret!!"))
+
+	info := []byte("CampusNet-Session-Handshake")
+
+	// 1. Both secrets valid -> hybrid secret derives successfully
+	hybridSecret, err := DeriveHybridPQSharedSecret(classicalSecret, pqSecret, info)
+	if err != nil {
+		t.Fatalf("hybrid derivation failed: %v", err)
+	}
+	if len(hybridSecret) != 32 {
+		t.Fatalf("expected 32-byte key, got %d", len(hybridSecret))
+	}
+
+	// 2. Classical secret alone CANNOT match hybrid secret (quantum resistance)
+	classicalOnly, _ := HKDFDerive([]byte("salt"), classicalSecret, info, 32)
+	if bytes.Equal(hybridSecret, classicalOnly) {
+		t.Fatalf("security violation: hybrid secret collapsed to classical-only secret!")
+	}
+
+	// 3. Rejection of invalid key sizes (fail-closed)
+	_, err = DeriveHybridPQSharedSecret(classicalSecret[:16], pqSecret, info)
+	if err == nil {
+		t.Fatalf("expected error on truncated classical secret")
+	}
+	_, err = DeriveHybridPQSharedSecret(classicalSecret, pqSecret[:16], info)
+	if err == nil {
+		t.Fatalf("expected error on truncated PQ secret")
+	}
+}
