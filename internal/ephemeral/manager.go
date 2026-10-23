@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/hit-chat/campusnet/pkg/protocol"
@@ -11,6 +12,7 @@ import (
 
 var (
 	ErrEnvelopeNotFound = errors.New("envelope not found, already burned, or expired")
+	ErrUnauthorizedBurn = errors.New("unauthorized: caller is not the recipient or sender of this envelope")
 )
 
 // Store defines the storage operations required for ephemeral E2EE message lifecycles.
@@ -93,6 +95,30 @@ func (m *Manager) BurnOnRead(ctx context.Context, id string) error {
 		return fmt.Errorf("burn-on-read failed: %w", err)
 	}
 	return nil
+}
+
+// BurnOnReadForUser verifies authorization before burning the envelope.
+// IDOR DEFENSE: Only the legitimate recipient or sender may burn the envelope.
+func (m *Manager) BurnOnReadForUser(ctx context.Context, id string, userHandle string) error {
+	env, err := m.store.GetEnvelope(ctx, id)
+	if err != nil {
+		return ErrEnvelopeNotFound
+	}
+
+	cleanUser := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(userHandle)), "@")
+	cleanUser = strings.TrimPrefix(cleanUser, "student_")
+
+	cleanRecipient := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(env.RecipientID)), "@")
+	cleanRecipient = strings.TrimPrefix(cleanRecipient, "student_")
+
+	cleanSender := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(env.SenderID)), "@")
+	cleanSender = strings.TrimPrefix(cleanSender, "student_")
+
+	if cleanUser != cleanRecipient && cleanUser != cleanSender {
+		return ErrUnauthorizedBurn
+	}
+
+	return m.BurnOnRead(ctx, id)
 }
 
 // WatchBurn registers a channel to be notified when a message is burned.

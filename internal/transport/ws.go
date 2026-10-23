@@ -261,9 +261,12 @@ func (c *Client) handleFrame(frame *protocol.StreamFrame) {
 
 	case protocol.OpAckRead:
 		if frame.AckMessageID != "" {
-			// Trigger immediate burn-on-read in ephemeral store
-			_ = c.hub.ephemeralMgr.BurnOnRead(ctx, frame.AckMessageID)
-			log.Printf("[WS] Envelope burned on read: %s", frame.AckMessageID)
+			// IDOR Defense: Only burn if caller is legitimate recipient or sender of this message
+			if err := c.hub.ephemeralMgr.BurnOnReadForUser(ctx, frame.AckMessageID, c.userHandle); err != nil {
+				c.sendError("cannot burn envelope: " + err.Error())
+			} else {
+				log.Printf("[WS] Envelope burned on read by %s: %s", c.userHandle, frame.AckMessageID)
+			}
 		}
 
 	case protocol.OpUpdatePresence:

@@ -71,3 +71,44 @@ func TestEphemeralTTLExpiration(t *testing.T) {
 		t.Fatalf("expected expired envelope to be purged, but it was found")
 	}
 }
+
+func TestBurnOnReadAuthorizationAndIDORPrevention(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(100 * time.Millisecond)
+	mgr := NewManager(store)
+	defer mgr.Close()
+
+	env := protocol.NewEnvelope("alice", "bob", 10000)
+	env.EphemeralPublicKey = make([]byte, 32)
+	env.IV = make([]byte, 12)
+	env.Ciphertext = []byte("confidential_for_bob")
+	env.AuthTag = make([]byte, 16)
+
+	if err := mgr.SaveEnvelope(ctx, env); err != nil {
+		t.Fatalf("failed to save envelope: %v", err)
+	}
+
+	// Attacker eve attempts to burn Alice and Bob's message
+	err := mgr.BurnOnReadForUser(ctx, env.ID, "eve")
+	if err == nil {
+		t.Fatalf("security violation: unauthorized user eve was able to burn Alice/Bob message!")
+	}
+
+	// Envelope MUST still be intact for legitimate recipient Bob
+	retrieved, err := mgr.RetrieveEnvelope(ctx, env.ID)
+	if err != nil || retrieved == nil {
+		t.Fatalf("message was destroyed by attacker eve!")
+	}
+
+	// Legitimate recipient Bob burns on read -> must succeed
+	err = mgr.BurnOnReadForUser(ctx, env.ID, "bob")
+	if err != nil {
+		t.Fatalf("legitimate recipient failed to burn message: %v", err)
+	}
+
+	// Now message is truly gone
+	_, err = mgr.RetrieveEnvelope(ctx, env.ID)
+	if err == nil {
+		t.Fatalf("expected message to be gone after legitimate burn")
+	}
+}
