@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,6 +24,24 @@ func main() {
 	redisAddr := flag.String("redis", "", "Redis address (e.g. localhost:6379). Defaults to in-memory store if unset")
 	jwtSecret := flag.String("secret", "campusnet-dev-session-secret-change-in-production-2026", "JWT session signing secret")
 	flag.Parse()
+
+	effectiveJWTSecret := *jwtSecret
+	if envSecret := os.Getenv("JWT_SECRET"); envSecret != "" {
+		effectiveJWTSecret = envSecret
+	}
+
+	campusSalt := os.Getenv("CAMPUS_SALT")
+
+	// Fail-closed enforcement for production deployments
+	isProduction := strings.EqualFold(os.Getenv("CAMPUSNET_ENV"), "production") || strings.EqualFold(os.Getenv("ENV"), "production")
+	if isProduction {
+		if effectiveJWTSecret == "campusnet-dev-session-secret-change-in-production-2026" || len(effectiveJWTSecret) < 32 {
+			log.Fatalf("[FATAL] Security misconfiguration: Production mode requires a strong, non-default JWT_SECRET of at least 32 characters!")
+		}
+		if campusSalt == "" || campusSalt == geo.DefaultCampusSalt {
+			log.Fatalf("[FATAL] Security misconfiguration: Production mode requires a non-default CAMPUS_SALT environment variable!")
+		}
+	}
 
 	log.Println("==================================================================")
 	log.Println("           CAMPUSNET EPHEMERAL GATEWAY SERVER v1.0.0             ")
@@ -55,10 +74,10 @@ func main() {
 	defer ephemMgr.Close()
 
 	// 2. Initialize Core Subsystems
-	tokenMgr := auth.NewTokenManager(*jwtSecret)
+	tokenMgr := auth.NewTokenManager(effectiveJWTSecret)
 	deviceFlowMgr := auth.NewDeviceFlowManager(tokenMgr, fmt.Sprintf("http://localhost:%d/pair", *port))
 	bundleRegistry := auth.NewBundleRegistry()
-	geoResolver := geo.NewBSSIDResolver("")
+	geoResolver := geo.NewBSSIDResolver(campusSalt)
 	privacyFilter := geo.NewPrivacyFilter(geoResolver)
 
 	// 3. Initialize WebSocket Hub & Transport
@@ -76,11 +95,12 @@ func main() {
 
 	serverAddr := fmt.Sprintf(":%d", *port)
 	srv := &http.Server{
-		Addr:         serverAddr,
-		Handler:      transport.CORSMiddleware(mainMux),
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:           serverAddr,
+		Handler:        transport.CORSMiddleware(mainMux),
+		ReadTimeout:    15 * time.Second,
+		WriteTimeout:   15 * time.Second,
+		IdleTimeout:    60 * time.Second,
+		MaxHeaderBytes: 1 << 20, // 1MB header limit to protect against header bomb DoS
 	}
 
 	// 5. Start Server in Goroutine

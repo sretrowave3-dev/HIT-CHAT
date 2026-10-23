@@ -78,6 +78,20 @@ func (tm *TokenManager) ValidateToken(tokenString string) (*DeviceClaims, error)
 		return nil, ErrTokenInvalid
 	}
 
+	// 1. Algorithm Pinning: strictly enforce HS256 algorithm (reject "none" or alg confusion attacks)
+	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, ErrTokenInvalid
+	}
+	var header struct {
+		Alg string `json:"alg"`
+		Typ string `json:"typ"`
+	}
+	if err := json.Unmarshal(headerBytes, &header); err != nil || header.Alg != "HS256" {
+		return nil, ErrTokenInvalid
+	}
+
+	// 2. Cryptographic Signature Verification using constant-time comparison
 	signatureInput := fmt.Sprintf("%s.%s", parts[0], parts[1])
 	mac := hmac.New(sha256.New, tm.secretKey)
 	mac.Write([]byte(signatureInput))
@@ -88,6 +102,7 @@ func (tm *TokenManager) ValidateToken(tokenString string) (*DeviceClaims, error)
 		return nil, ErrTokenInvalid
 	}
 
+	// 3. Claims deserialization and temporal checks
 	claimsBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
 		return nil, ErrTokenInvalid
@@ -98,8 +113,13 @@ func (tm *TokenManager) ValidateToken(tokenString string) (*DeviceClaims, error)
 		return nil, ErrTokenInvalid
 	}
 
-	if time.Now().Unix() > claims.ExpiresAt {
+	now := time.Now().Unix()
+	if now > claims.ExpiresAt {
 		return nil, ErrTokenExpired
+	}
+	// Defend against future-dated token fraud
+	if claims.IssuedAt > now+300 {
+		return nil, ErrTokenInvalid
 	}
 
 	return &claims, nil
