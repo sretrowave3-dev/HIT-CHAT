@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Send, Trash2, Clock, Lock } from 'lucide-react';
 import { CountdownTimer } from './CountdownTimer.tsx';
+import { canonicalHandle } from '../crypto/ratchet.ts';
 
 export interface DisplayMessage {
   id: string;
@@ -81,7 +82,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
           </div>
         ) : (
           messages.map(msg => {
-            const isMe = msg.sender === currentUser;
+            const isMe = canonicalHandle(msg.sender) === canonicalHandle(currentUser);
             return (
               <div
                 key={msg.id}
@@ -117,7 +118,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                   </div>
                 </div>
                 <span className="text-[10px] text-gray-500 mt-1 px-1">
-                  {isMe ? 'You' : msg.sender} • {new Date(msg.timestampMS).toLocaleTimeString()}
+                  {isMe ? 'You' : msg.sender} • {new Date(msg.timestampMS > 0 ? msg.timestampMS : Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                 </span>
               </div>
             );

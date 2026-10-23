@@ -1,16 +1,23 @@
-import React, { useState, useEffect } from 'react';
-import { Terminal, Shield, Flame, Users, Lock, Zap } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Terminal, Shield, Flame, Users, Lock, Zap, UserPlus } from 'lucide-react';
 import { PresenceBadge } from './components/PresenceBadge.tsx';
 import { ChatFeed, DisplayMessage } from './components/ChatFeed.tsx';
 import { DevicePairing } from './components/DevicePairing.tsx';
 import { WebKeyStore } from './crypto/keys.ts';
-import { WebRatchet } from './crypto/ratchet.ts';
+import { WebRatchet, WebEnvelope, canonicalHandle } from './crypto/ratchet.ts';
 import { useWebSocket } from './hooks/useWebSocket.ts';
 
 export const App: React.FC = () => {
   const [currentUser] = useState('alice');
-  const [contacts, setContacts] = useState<string[]>(['@bob', '@carol', '@study_group', '@robotics_lab']);
-  const [currentContact, setCurrentContact] = useState('@bob');
+  const [contacts, setContacts] = useState<string[]>([
+    '@student_guest',
+    '@bob',
+    '@carol',
+    '@study_group',
+    '@robotics_lab',
+  ]);
+  const [currentContact, setCurrentContact] = useState('@student_guest');
+  const [newContactInput, setNewContactInput] = useState('');
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [zoneDisplayName, setZoneDisplayName] = useState('Library 2nd Floor - Silent Study');
   const [buildingName, setBuildingName] = useState<string | undefined>('Main Library');
@@ -19,7 +26,7 @@ export const App: React.FC = () => {
   const [token, setToken] = useState<string | null>(null);
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
 
-  const keyStore = React.useMemo(() => new WebKeyStore(), []);
+  const keyStore = useMemo(() => new WebKeyStore(), []);
 
   // Initialize authenticated session and register PreKeyBundle on backend
   useEffect(() => {
@@ -84,54 +91,51 @@ export const App: React.FC = () => {
     ]);
   }, [currentUser, keyStore]);
 
-  const { isConnected, sendEnvelope, ackRead, updatePresence, incomingEnvelope, burnedMessageId } =
-    useWebSocket(token);
-
-  // Handle incoming WebSocket envelopes
-  useEffect(() => {
-    if (!incomingEnvelope) return;
-
-    const processEnvelope = async () => {
-      let plaintext = '';
+  const handleIncomingEnvelope = useCallback(async (incomingEnvelope: WebEnvelope) => {
+    let plaintext = '';
+    try {
+      const fallbackSecret = 'CampusNet_Ratchet_Shared_Demo_Secret';
+      plaintext = await WebRatchet.decryptWithPairwiseFallback(incomingEnvelope, fallbackSecret);
+    } catch {
+      // Fallback for plain text or UTF-8 string
       try {
-        const fallbackSecret = 'CampusNet_Ratchet_Shared_Demo_Secret';
-        plaintext = await WebRatchet.decryptWithPairwiseFallback(incomingEnvelope, fallbackSecret);
+        const decoded = atob(incomingEnvelope.ciphertext);
+        if (/^[\x20-\x7E\s\u00A0-\uFFFF]*$/.test(decoded) && decoded.length > 0) {
+          plaintext = decoded;
+        } else {
+          plaintext = '[Encrypted Ephemeral Message]';
+        }
       } catch {
-        // Fallback for plain text or UTF-8 string
-        try {
-          const decoded = atob(incomingEnvelope.ciphertext);
-          // Only use decoded if it's printable characters (not binary ciphertext bytes)
-          if (/^[\x20-\x7E\s\u00A0-\uFFFF]*$/.test(decoded) && decoded.length > 0) {
-            plaintext = decoded;
-          } else {
-            plaintext = '[Encrypted Ephemeral Message]';
-          }
-        } catch {
-          plaintext = incomingEnvelope.ciphertext;
-        }
+        plaintext = incomingEnvelope.ciphertext;
       }
+    }
 
-      const senderTag = incomingEnvelope.sender_id.startsWith('@')
-        ? incomingEnvelope.sender_id
-        : '@' + incomingEnvelope.sender_id;
+    const senderTag = incomingEnvelope.sender_id.startsWith('@')
+      ? incomingEnvelope.sender_id
+      : '@' + incomingEnvelope.sender_id;
 
-      // Add sender to contacts if not present
-      setContacts(prev => {
-        if (!prev.includes(senderTag)) {
-          return [senderTag, ...prev];
-        }
+    // Add sender to contacts if not present
+    setContacts(prev => {
+      const exists = prev.some(c => canonicalHandle(c) === canonicalHandle(senderTag));
+      if (!exists) {
+        return [senderTag, ...prev];
+      }
+      return prev;
+    });
+
+    // Track unread if not currently looking at this sender
+    if (canonicalHandle(currentContact) !== canonicalHandle(senderTag)) {
+      setUnreadCounts(prev => ({
+        ...prev,
+        [senderTag]: (prev[senderTag] || 0) + 1,
+      }));
+    }
+
+    setMessages(prev => {
+      if (prev.some(m => m.id === incomingEnvelope.id)) {
         return prev;
-      });
-
-      // Track unread if not currently looking at this sender
-      if (currentContact !== senderTag) {
-        setUnreadCounts(prev => ({
-          ...prev,
-          [senderTag]: (prev[senderTag] || 0) + 1,
-        }));
       }
-
-      setMessages(prev => [
+      return [
         ...prev,
         {
           id: incomingEnvelope.id,
@@ -141,17 +145,32 @@ export const App: React.FC = () => {
           timestampMS: incomingEnvelope.timestamp_ms || Date.now(),
           ttlMS: incomingEnvelope.ttl_ms || 15000,
         },
-      ]);
-    };
+      ];
+    });
+  }, [currentContact, currentUser]);
 
-    processEnvelope();
-  }, [incomingEnvelope, currentUser]);
+  const handleBurn = useCallback((messageId: string) => {
+    setMessages(prev => prev.filter(m => m.id !== messageId));
+  }, []);
 
-  // Handle burn notifications
-  useEffect(() => {
-    if (!burnedMessageId) return;
-    setMessages(prev => prev.filter(m => m.id !== burnedMessageId));
-  }, [burnedMessageId]);
+  const wsOptions = useMemo(() => ({
+    onEnvelope: handleIncomingEnvelope,
+    onBurn: handleBurn,
+  }), [handleIncomingEnvelope, handleBurn]);
+
+  const { isConnected, sendEnvelope, ackRead, updatePresence } =
+    useWebSocket(token, wsOptions);
+
+  const handleAddContact = () => {
+    const raw = newContactInput.trim();
+    if (!raw) return;
+    const tag = raw.startsWith('@') ? raw : '@' + raw;
+    if (!contacts.some(c => canonicalHandle(c) === canonicalHandle(tag))) {
+      setContacts(prev => [tag, ...prev]);
+    }
+    setCurrentContact(tag);
+    setNewContactInput('');
+  };
 
   const handleSendMessage = async (text: string, ttlMS: number) => {
     const sessionSecret = WebRatchet.getPairwiseSecret(currentUser, currentContact);
@@ -286,9 +305,29 @@ export const App: React.FC = () => {
               <span>Campus Peers</span>
             </div>
 
+            <div className="flex gap-1.5 px-1 mb-1">
+              <input
+                type="text"
+                placeholder="Add @peer..."
+                value={newContactInput}
+                onChange={e => setNewContactInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleAddContact();
+                }}
+                className="bg-cyber-900 border border-gray-700 text-xs text-gray-200 rounded-lg px-2.5 py-1.5 flex-1 focus:outline-none focus:border-emerald-500"
+              />
+              <button
+                onClick={handleAddContact}
+                title="Add peer to chat"
+                className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold flex items-center justify-center transition"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
             <div className="space-y-1.5 flex-1 overflow-y-auto">
               {contacts.map(c => {
-                const isActive = c === currentContact;
+                const isActive = canonicalHandle(c) === canonicalHandle(currentContact);
                 return (
                   <button
                     key={c}
@@ -333,12 +372,13 @@ export const App: React.FC = () => {
             <ChatFeed
               currentContact={currentContact}
               currentUser={currentUser}
-              messages={messages.filter(m =>
-                m.recipient === currentContact ||
-                m.sender === currentContact ||
-                m.recipient === currentContact.replace('@', '') ||
-                m.sender === currentContact.replace('@', '')
-              )}
+              messages={messages.filter(m => {
+                const activeCan = canonicalHandle(currentContact);
+                return (
+                  canonicalHandle(m.sender) === activeCan ||
+                  canonicalHandle(m.recipient) === activeCan
+                );
+              })}
               onSendMessage={handleSendMessage}
               onBurnMessage={handleBurnMessage}
             />

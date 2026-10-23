@@ -12,18 +12,30 @@ export const CountdownTimer: React.FC<CountdownTimerProps> = ({
   ttlMS,
   onExpire,
 }) => {
-  const [remaining, setRemaining] = useState<number>(() => {
-    const elapsed = Date.now() - timestampMS;
-    return Math.max(0, ttlMS - elapsed);
-  });
+  // Capture local arrival timestamp so client clock skew against server never causes instant auto-burn
+  const arrivalTimeRef = useRef<number>(Date.now());
+  const effectiveTTL = Math.max(3000, ttlMS || 10000); // Minimum 3s reading window
 
+  const computeRemaining = () => {
+    const now = Date.now();
+    const clientElapsed = now - arrivalTimeRef.current;
+    const serverElapsed = now - (timestampMS || arrivalTimeRef.current);
+
+    // If server clock has skew (future or past), prioritize local elapsed reading time
+    let elapsed = clientElapsed;
+    if (serverElapsed > 0 && Math.abs(serverElapsed - clientElapsed) < 5000) {
+      elapsed = Math.max(clientElapsed, serverElapsed);
+    }
+    return Math.max(0, effectiveTTL - elapsed);
+  };
+
+  const [remaining, setRemaining] = useState<number>(computeRemaining);
   const onExpireRef = useRef(onExpire);
   onExpireRef.current = onExpire;
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const elapsed = Date.now() - timestampMS;
-      const left = Math.max(0, ttlMS - elapsed);
+      const left = computeRemaining();
       setRemaining(left);
       if (left <= 0) {
         clearInterval(interval);
@@ -32,9 +44,9 @@ export const CountdownTimer: React.FC<CountdownTimerProps> = ({
     }, 100);
 
     return () => clearInterval(interval);
-  }, [timestampMS, ttlMS]);
+  }, [timestampMS, effectiveTTL]);
 
-  const percentage = Math.max(0, Math.min(100, (remaining / ttlMS) * 100));
+  const percentage = Math.max(0, Math.min(100, (remaining / effectiveTTL) * 100));
   const seconds = (remaining / 1000).toFixed(1);
 
   const isLow = remaining < 3000;

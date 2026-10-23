@@ -23,6 +23,30 @@ export function canonicalHandle(h: string): string {
   return clean;
 }
 
+export function uint8ArrayToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const len = bytes.byteLength;
+  const chunkSize = 8192;
+  for (let i = 0; i < len; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
+    binary += String.fromCharCode.apply(null, Array.from(chunk));
+  }
+  return btoa(binary);
+}
+
+export function base64ToUint8Array(b64: string): Uint8Array {
+  let clean = (b64 || '').replace(/-/g, '+').replace(/_/g, '/').trim();
+  while (clean.length % 4 !== 0) {
+    clean += '=';
+  }
+  const binary = atob(clean);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
 export function getPairwiseSecret(user1: string, user2: string): string {
   const u1 = canonicalHandle(user1);
   const u2 = canonicalHandle(user2);
@@ -123,12 +147,12 @@ export class WebRatchet {
       id: uuid,
       sender_id: sender,
       recipient_id: recipient,
-      ephemeral_public_key: btoa(String.fromCharCode(...ephemeralKey)),
+      ephemeral_public_key: uint8ArrayToBase64(ephemeralKey),
       ratchet_seq: 1,
       chain_seq: 1,
-      iv: btoa(String.fromCharCode(...iv)),
-      ciphertext: btoa(String.fromCharCode(...ciphertextBytes)),
-      auth_tag: btoa(String.fromCharCode(...tagBytes)),
+      iv: uint8ArrayToBase64(iv),
+      ciphertext: uint8ArrayToBase64(ciphertextBytes),
+      auth_tag: uint8ArrayToBase64(tagBytes),
       ttl_ms: ttlMS,
       timestamp_ms: Date.now(),
     };
@@ -141,9 +165,9 @@ export class WebRatchet {
   static async decryptMessage(env: WebEnvelope, _sessionSecret?: string): Promise<string> {
     const key = await this.derivePairwiseKey(env.sender_id, env.recipient_id);
 
-    const ivBytes = Uint8Array.from(atob(env.iv), c => c.charCodeAt(0));
-    const cipherBytes = Uint8Array.from(atob(env.ciphertext), c => c.charCodeAt(0));
-    const tagBytes = Uint8Array.from(atob(env.auth_tag), c => c.charCodeAt(0));
+    const ivBytes = base64ToUint8Array(env.iv);
+    const cipherBytes = base64ToUint8Array(env.ciphertext);
+    const tagBytes = base64ToUint8Array(env.auth_tag);
 
     // Combine ciphertext and tag for WebCrypto
     const combined = new Uint8Array(cipherBytes.length + tagBytes.length);
@@ -153,11 +177,11 @@ export class WebRatchet {
     const decrypted = await window.crypto.subtle.decrypt(
       {
         name: 'AES-GCM',
-        iv: ivBytes,
+        iv: ivBytes as any,
         tagLength: 128,
       },
       key,
-      combined
+      combined as any
     );
 
     const dec = new TextDecoder();

@@ -27,6 +27,8 @@ type ChatMessage struct {
 type tickMsg time.Time
 
 type wsIncomingMsg *protocol.Envelope
+type wsBurnMsg string
+type wsCloseMsg struct{ err error }
 
 type model struct {
 	serverURL       string
@@ -127,6 +129,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				sender = "@" + sender
 			}
 
+			// Ensure sender is present in contacts list
+			found := false
+			for _, c := range m.contacts {
+				if strings.EqualFold(c, sender) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				m.contacts = append(m.contacts, sender)
+			}
+
 			// Decrypt incoming payload with pairwise key isolation
 			decrypted, dErr := crypto.DecryptPairwisePayload(msg.SenderID, m.userHandle, msg.IV, msg.Ciphertext, msg.AuthTag)
 			bodyText := ""
@@ -151,6 +165,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.listenWebSocket()
 
+	case wsBurnMsg:
+		burnID := string(msg)
+		for c := range m.messages {
+			var remaining []ChatMessage
+			for _, item := range m.messages[c] {
+				if item.ID != burnID {
+					remaining = append(remaining, item)
+				}
+			}
+			m.messages[c] = remaining
+		}
+		return m, m.listenWebSocket()
+
+	case wsCloseMsg:
+		m.statusMessage = "WebSocket disconnected. Press [Ctrl+A] to reconnect."
+		m.wsConn = nil
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -173,12 +205,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.Type {
 
-		case tea.KeyCtrlC, tea.KeyEsc:
+		case tea.KeyCtrlC:
 			m.quitting = true
 			if m.wsConn != nil {
 				_ = m.wsConn.Close()
 			}
 			return m, tea.Quit
+
+		case tea.KeyEsc:
+			if len(m.inputBuffer) > 0 {
+				m.inputBuffer = ""
+				m.statusMessage = "Input buffer cleared."
+				return m, nil
+			}
+			m.statusMessage = "Press [Ctrl+C] to exit CampusNet."
+			return m, nil
 
 		case tea.KeyTab, tea.KeyDown:
 			m.selectedContact = (m.selectedContact + 1) % len(m.contacts)
@@ -247,8 +288,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case tea.KeyBackspace:
-			if len(m.inputBuffer) > 0 {
-				m.inputBuffer = m.inputBuffer[:len(m.inputBuffer)-1]
+			runes := []rune(m.inputBuffer)
+			if len(runes) > 0 {
+				m.inputBuffer = string(runes[:len(runes)-1])
 			}
 			return m, nil
 
@@ -258,9 +300,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				target := m.contacts[m.selectedContact]
 				now := time.Now()
 				ttlMS := int64(15000) // 15 seconds
+				cleanTarget := strings.TrimPrefix(target, "@")
+				env := protocol.NewEnvelope(m.userHandle, cleanTarget, ttlMS)
 
 				chatMsg := ChatMessage{
-					ID:        fmt.Sprintf("msg-%d", now.UnixNano()),
+					ID:        env.ID,
 					Sender:    "@" + m.userHandle,
 					Text:      text,
 					SentAt:    now,
@@ -270,8 +314,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// If connected to server, send encrypted over WebSocket
 				if m.wsConn != nil {
-					cleanTarget := strings.TrimPrefix(target, "@")
-					env := protocol.NewEnvelope(m.userHandle, cleanTarget, ttlMS)
 					iv, cipher, tag, eErr := crypto.EncryptPairwisePayload(m.userHandle, cleanTarget, []byte(text))
 					if eErr == nil {
 						env.IV = iv
@@ -311,15 +353,29 @@ func (m model) listenWebSocket() tea.Cmd {
 		if m.wsConn == nil {
 			return nil
 		}
-		_, data, err := m.wsConn.ReadMessage()
-		if err != nil {
-			return nil
+		for {
+			_, data, err := m.wsConn.ReadMessage()
+			if err != nil {
+				return wsCloseMsg{err: err}
+			}
+			var frame protocol.StreamFrame
+			if err := json.Unmarshal(data, &frame); err != nil {
+				continue
+			}
+			switch frame.Op {
+			case protocol.OpDeliverEnvelope:
+				if frame.Envelope != nil {
+					return wsIncomingMsg(frame.Envelope)
+				}
+			case protocol.OpAckRead:
+				if frame.AckMessageID != "" {
+					return wsBurnMsg(frame.AckMessageID)
+				}
+			default:
+				// Other stream frames (OpAckDelivered, OpHeartbeat, etc.) - keep loop alive
+				continue
+			}
 		}
-		var frame protocol.StreamFrame
-		if err := json.Unmarshal(data, &frame); err == nil && frame.Op == protocol.OpDeliverEnvelope {
-			return wsIncomingMsg(frame.Envelope)
-		}
-		return nil
 	}
 }
 
@@ -394,8 +450,9 @@ func (m model) View() string {
 			}
 			timerStr := fmt.Sprintf("[%.1fs]", rem)
 			line := fmt.Sprintf(" %s %s: %s", timerStr, msg.Sender, msg.Text)
-			if len(line) > 46 {
-				line = line[:43] + "..."
+			runes := []rune(line)
+			if len(runes) > 46 {
+				line = string(runes[:43]) + "..."
 			}
 			msgLines = append(msgLines, line)
 		}

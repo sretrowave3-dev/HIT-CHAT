@@ -9,12 +9,21 @@ export interface PresenceInfo {
   locationEnabled: boolean;
 }
 
-export function useWebSocket(token: string | null) {
+export interface UseWebSocketOptions {
+  onEnvelope?: (env: WebEnvelope) => void;
+  onBurn?: (messageId: string) => void;
+  onPresence?: (presence: PresenceInfo) => void;
+}
+
+export function useWebSocket(token: string | null, options?: UseWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [incomingEnvelope, setIncomingEnvelope] = useState<WebEnvelope | null>(null);
   const [burnedMessageId, setBurnedMessageId] = useState<string | null>(null);
   const [peerPresence, setPeerPresence] = useState<PresenceInfo | null>(null);
+
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   useEffect(() => {
     if (!token) return;
@@ -52,16 +61,26 @@ export function useWebSocket(token: string | null) {
           const frame = JSON.parse(event.data);
           if (frame.op === 'DELIVER_ENVELOPE' && frame.envelope) {
             setIncomingEnvelope(frame.envelope);
+            if (optionsRef.current?.onEnvelope) {
+              optionsRef.current.onEnvelope(frame.envelope);
+            }
           } else if (frame.op === 'ACK_READ' && frame.ack_message_id) {
             setBurnedMessageId(frame.ack_message_id);
+            if (optionsRef.current?.onBurn) {
+              optionsRef.current.onBurn(frame.ack_message_id);
+            }
           } else if (frame.op === 'ZONE_PRESENCE' && frame.presence) {
-            setPeerPresence({
+            const pInfo: PresenceInfo = {
               userHandle: frame.presence.user_handle,
               zoneCode: frame.presence.zone_code,
               displayZone: frame.presence.display_zone,
               buildingName: frame.presence.building_name,
               locationEnabled: frame.presence.location_enabled,
-            });
+            };
+            setPeerPresence(pInfo);
+            if (optionsRef.current?.onPresence) {
+              optionsRef.current.onPresence(pInfo);
+            }
           }
         } catch (e) {
           console.error('[WS Parse Error]', e);
