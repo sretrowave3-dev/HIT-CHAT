@@ -112,3 +112,34 @@ func TestBurnOnReadAuthorizationAndIDORPrevention(t *testing.T) {
 		t.Fatalf("expected message to be gone after legitimate burn")
 	}
 }
+
+func TestMemoryStoreCapacityAndQuotaEnforcement(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(100 * time.Millisecond)
+	store.SetQuotas(10, 3) // max 10 total, max 3 per recipient
+	mgr := NewManager(store)
+	defer mgr.Close()
+
+	// Fill Bob's quota of 3
+	for i := 0; i < 3; i++ {
+		env := protocol.NewEnvelope("alice", "bob", 10000)
+		env.EphemeralPublicKey = make([]byte, 32)
+		env.IV = make([]byte, 12)
+		env.Ciphertext = []byte("msg")
+		env.AuthTag = make([]byte, 16)
+		if err := mgr.SaveEnvelope(ctx, env); err != nil {
+			t.Fatalf("failed to save envelope %d: %v", i, err)
+		}
+	}
+
+	// 4th envelope to Bob must be rejected due to quota limit
+	overflowEnv := protocol.NewEnvelope("alice", "bob", 10000)
+	overflowEnv.EphemeralPublicKey = make([]byte, 32)
+	overflowEnv.IV = make([]byte, 12)
+	overflowEnv.Ciphertext = []byte("overflow")
+	overflowEnv.AuthTag = make([]byte, 16)
+	err := mgr.SaveEnvelope(ctx, overflowEnv)
+	if err != ErrRecipientQuotaExceeded {
+		t.Fatalf("expected ErrRecipientQuotaExceeded, got: %v", err)
+	}
+}
