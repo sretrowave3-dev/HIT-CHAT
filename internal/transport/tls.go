@@ -18,14 +18,69 @@ import (
 	"github.com/skip2/go-qrcode"
 )
 
-// GetLocalIPv4Addresses discovers all non-loopback, active unicast IPv4 addresses.
+// IsVirtualOrHostOnlyIP returns true if the IP belongs to a known host-only virtual network (e.g. 192.168.56.x).
+func IsVirtualOrHostOnlyIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	v4 := ip.To4()
+	if v4 == nil {
+		return false
+	}
+	// VirtualBox Host-Only subnet: 192.168.56.0/24
+	if v4[0] == 192 && v4[1] == 168 && v4[2] == 56 {
+		return true
+	}
+	return false
+}
+
+// isVirtualOrHostOnlyInterface returns true if the interface name or IP indicates a virtual/host-only adapter.
+func isVirtualOrHostOnlyInterface(name string, ip net.IP) bool {
+	if IsVirtualOrHostOnlyIP(ip) {
+		return true
+	}
+	lower := strings.ToLower(name)
+	virtualKeywords := []string{
+		"virtual", "vbox", "vmware", "vmnet", "hyper-v", "vethernet",
+		"wsl", "docker", "container", "tailscale", "zerotier", "wireguard",
+		"tap", "tun", "pseudo",
+	}
+	for _, kw := range virtualKeywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// GetPreferredOutboundIP queries the OS routing table to determine which local IPv4 address
+// is utilized for active outbound LAN/Internet traffic. Does not send network packets.
+func GetPreferredOutboundIP() (net.IP, error) {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		conn, err = net.Dial("udp", "1.1.1.1:80")
+		if err != nil {
+			return nil, err
+		}
+	}
+	defer conn.Close()
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP.To4(), nil
+}
+
+// GetLocalIPv4Addresses discovers all non-loopback, active unicast IPv4 addresses,
+// prioritizing the primary routable LAN adapter first and filtering virtual host-only adapters.
 func GetLocalIPv4Addresses() ([]net.IP, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
 		return nil, fmt.Errorf("listing network interfaces: %w", err)
 	}
 
-	var ips []net.IP
+	preferredIP, _ := GetPreferredOutboundIP()
+
+	var physicalIPs []net.IP
+	var virtualIPs []net.IP
+
 	for _, iface := range interfaces {
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
 			continue
@@ -42,12 +97,42 @@ func GetLocalIPv4Addresses() ([]net.IP, error) {
 			case *net.IPAddr:
 				ip = v.IP
 			}
-			if ip != nil && ip.To4() != nil && !ip.IsLoopback() {
-				ips = append(ips, ip.To4())
+			if ip == nil || ip.To4() == nil || ip.IsLoopback() {
+				continue
+			}
+			ipv4 := ip.To4()
+			if isVirtualOrHostOnlyInterface(iface.Name, ipv4) {
+				virtualIPs = append(virtualIPs, ipv4)
+			} else {
+				physicalIPs = append(physicalIPs, ipv4)
 			}
 		}
 	}
-	return ips, nil
+
+	var result []net.IP
+	if preferredIP != nil && !IsVirtualOrHostOnlyIP(preferredIP) {
+		result = append(result, preferredIP)
+	}
+
+	appendUnique := func(list []net.IP) {
+		for _, ip := range list {
+			duplicate := false
+			for _, r := range result {
+				if r.Equal(ip) {
+					duplicate = true
+					break
+				}
+			}
+			if !duplicate {
+				result = append(result, ip)
+			}
+		}
+	}
+
+	appendUnique(physicalIPs)
+	appendUnique(virtualIPs)
+
+	return result, nil
 }
 
 // EnsureDevCertificates guarantees an isolated Root CA and Leaf Server Certificate exist
@@ -74,7 +159,6 @@ func EnsureDevCertificates(certDir string, lanIPs []net.IP) (certFile, keyFile, 
 	} else {
 		caPrivKey, caCert, err = loadRootCA(caCertPath, caKeyPath)
 		if err != nil {
-			// If loading failed (e.g. corrupt or old format), regenerate
 			caPrivKey, caCert, err = generateRootCA(caCertPath, caKeyPath)
 			if err != nil {
 				return "", "", "", fmt.Errorf("regenerating root ca: %w", err)
@@ -106,11 +190,11 @@ func generateRootCA(certPath, keyPath string) (*ecdsa.PrivateKey, *x509.Certific
 	template := &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			Organization:  []string{"CampusNet Security Foundation"},
-			CommonName:    "CampusNet Local Development Root CA",
-			Country:       []string{"IN"},
-			Province:      []string{"Campus"},
-			Locality:      []string{"Localhost"},
+			Organization: []string{"CampusNet Security Foundation"},
+			CommonName:   "CampusNet Local Development Root CA",
+			Country:      []string{"IN"},
+			Province:     []string{"Campus"},
+			Locality:     []string{"Localhost"},
 		},
 		NotBefore:             time.Now().Add(-1 * time.Hour),
 		NotAfter:              time.Now().Add(3650 * 24 * time.Hour), // 10 years
@@ -249,7 +333,7 @@ func PrintLANBanner(host string, port int, lanIPs []net.IP, isTLS bool, caPath s
 	}
 
 	fmt.Println("==================================================================")
-	fmt.Printf(" [CAMPUSNET ACCESS GATEWAY] Server ready on port :%d\n", port)
+	fmt.Printf(" [CAMPUSNET ACCESS GATEWAY] Server active on port :%d\n", port)
 	fmt.Println("==================================================================")
 	fmt.Printf(" -> Localhost Web:      %s://localhost:%d\n", scheme, port)
 	fmt.Printf(" -> Localhost Stream:   %s://localhost:%d/ws/v1/stream\n", wsScheme, port)
@@ -260,7 +344,13 @@ func PrintLANBanner(host string, port int, lanIPs []net.IP, isTLS bool, caPath s
 		fmt.Println(" LAN / MOBILE ACCESS (Connected to Wi-Fi / Hotspot):")
 		for i, ip := range lanIPs {
 			lanURL := fmt.Sprintf("%s://%s:%d", scheme, ip.String(), port)
-			fmt.Printf(" [%d] %s\n", i+1, lanURL)
+			tag := ""
+			if IsVirtualOrHostOnlyIP(ip) {
+				tag = " [Virtual/Host-Only adapter - not reachable from Wi-Fi]"
+			} else if i == 0 {
+				tag = " [PRIMARY ROUTABLE LAN WI-FI]"
+			}
+			fmt.Printf(" [%d] %s%s\n", i+1, lanURL, tag)
 			if i == 0 {
 				primaryURL = lanURL
 			}
@@ -269,17 +359,23 @@ func PrintLANBanner(host string, port int, lanIPs []net.IP, isTLS bool, caPath s
 
 	if isTLS {
 		fmt.Println("------------------------------------------------------------------")
-		fmt.Printf(" LOCAL ROOT CA: %s\n", caPath)
-		fmt.Println(" * Note for Mobile / Chrome: To bypass self-signed alert or enable")
-		fmt.Println("   WebCrypto on other devices, either install ca.crt or click")
-		fmt.Println("   'Advanced -> Proceed' / type 'thisisunsafe' in Chrome.")
+		if caPath != "" {
+			fmt.Printf(" LOCAL ROOT CA: %s\n", caPath)
+			fmt.Printf(" -> Direct CA Download: %s/ca.crt\n", primaryURL)
+		}
+		fmt.Println(" * Note for Mobile Browsers (Chrome / Safari):")
+		fmt.Println("   1. Open the QR link on your phone/tablet.")
+		fmt.Println("   2. When browser shows 'Connection is not private':")
+		fmt.Println("      - Android Chrome: Tap 'Advanced' -> 'Proceed to [IP] (unsafe)'.")
+		fmt.Println("      - iOS Safari: Tap 'Show Details' -> 'visit this website'.")
+		fmt.Println("   3. An HTTP redirect listener is also active on port :8081.")
 	}
 
 	fmt.Println("==================================================================")
-	fmt.Println(" SCAN QR CODE TO OPEN ON MOBILE / TABLET:")
+	fmt.Printf(" SCAN QR CODE TO OPEN ON MOBILE / TABLET:\n (Target: %s)\n", primaryURL)
 	fmt.Println()
 
-	// Render Terminal ASCII QR code
+	// Render Terminal ASCII QR code for the primary routable URL
 	if qr, err := qrcode.New(primaryURL, qrcode.Medium); err == nil {
 		fmt.Print(qr.ToSmallString(false))
 	} else {
@@ -288,5 +384,4 @@ func PrintLANBanner(host string, port int, lanIPs []net.IP, isTLS bool, caPath s
 
 	fmt.Println()
 	fmt.Println("==================================================================")
-	_ = strings.TrimSpace("")
 }

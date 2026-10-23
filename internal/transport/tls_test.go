@@ -64,7 +64,7 @@ func TestEnsureDevCertificatesSANs(t *testing.T) {
 	roots := x509.NewCertPool()
 	roots.AddCert(caCert)
 	opts := x509.VerifyOptions{
-		Roots: roots,
+		Roots:   roots,
 		DNSName: "localhost",
 	}
 	if _, err := serverCert.Verify(opts); err != nil {
@@ -106,6 +106,13 @@ func TestGetLocalIPv4Addresses(t *testing.T) {
 		}
 		if ip.To4() == nil {
 			t.Errorf("Non-IPv4 address %v returned in IPv4 discovery", ip)
+		}
+	}
+	// Verify preferred outbound IP is first if present
+	pref, _ := GetPreferredOutboundIP()
+	if pref != nil && len(ips) > 0 && !IsVirtualOrHostOnlyIP(pref) {
+		if !ips[0].Equal(pref) {
+			t.Errorf("Expected primary routable IP %v at index 0, got %v", pref, ips[0])
 		}
 	}
 }

@@ -15,8 +15,15 @@ if %ERRORLEVEL% neq 0 (
 cd ..
 
 echo.
-echo 2. Launching CampusNet Gateway with --lan and --dev-auth...
-echo    (Local CA and Server TLS cert will be generated under .campusnet-tls\)
+echo 2. Compiling server binary with devauth tag into bin\campusnet-server.exe...
+go build -tags devauth -o bin\campusnet-server.exe .\cmd\server
+if %ERRORLEVEL% neq 0 (
+    echo [ERROR] Server build failed. Aborting.
+    pause
+    exit /b 1
+)
+
 echo.
-go run -tags devauth ./cmd/server --lan --dev-auth
+echo 3. Launching bin\campusnet-server.exe with --lan and --dev-auth...
+bin\campusnet-server.exe --lan --dev-auth
 pause

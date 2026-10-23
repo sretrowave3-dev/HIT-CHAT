@@ -98,7 +98,7 @@ func main() {
 	router := transport.NewRouter(deviceFlowMgr, bundleRegistry, tokenMgr, geoResolver, privacyFilter)
 	router.SetDevAuthEnabled(*devAuth)
 
-	// Discover LAN IPs
+	// Discover LAN IPs (routably ordered, physical first)
 	lanIPs, err := transport.GetLocalIPv4Addresses()
 	if err != nil {
 		log.Printf("[WARN] Failed to discover local IPv4 addresses: %v", err)
@@ -117,6 +117,13 @@ func main() {
 	mainMux.HandleFunc("/ws/v1/stream", func(w http.ResponseWriter, r *http.Request) {
 		hub.ServeWS(tokenMgr, w, r)
 	})
+	if caPath != "" {
+		mainMux.HandleFunc("/ca.crt", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/x-x509-ca-cert")
+			w.Header().Set("Content-Disposition", `attachment; filename="campusnet-ca.crt"`)
+			http.ServeFile(w, r, caPath)
+		})
+	}
 	mainMux.Handle("/", router.Handler())
 
 	serverAddr := fmt.Sprintf("%s:%d", bindHost, *port)
@@ -126,12 +133,52 @@ func main() {
 		ReadTimeout:    15 * time.Second,
 		WriteTimeout:   15 * time.Second,
 		IdleTimeout:    60 * time.Second,
-		MaxHeaderBytes: 1 << 20, // 1MB header limit to protect against header bomb DoS
+		MaxHeaderBytes: 1 << 20, // 1MB header limit
 	}
 
-	// 5. Start Server in Goroutine
+	var httpRedirectSrv *http.Server
+	if useTLS {
+		// Auxiliary HTTP redirect server on port+1 (e.g. 8081)
+		httpRedirectPort := *port + 1
+		httpRedirectAddr := fmt.Sprintf("%s:%d", bindHost, httpRedirectPort)
+
+		redirectMux := http.NewServeMux()
+		if caPath != "" {
+			redirectMux.HandleFunc("/ca.crt", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/x-x509-ca-cert")
+				w.Header().Set("Content-Disposition", `attachment; filename="campusnet-ca.crt"`)
+				http.ServeFile(w, r, caPath)
+			})
+		}
+		redirectMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			host := r.Host
+			if strings.Contains(host, ":") {
+				h, _, _ := strings.Cut(host, ":")
+				host = fmt.Sprintf("%s:%d", h, *port)
+			} else {
+				host = fmt.Sprintf("%s:%d", host, *port)
+			}
+			target := fmt.Sprintf("https://%s%s", host, r.RequestURI)
+			http.Redirect(w, r, target, http.StatusTemporaryRedirect)
+		})
+
+		httpRedirectSrv = &http.Server{
+			Addr:         httpRedirectAddr,
+			Handler:      redirectMux,
+			ReadTimeout:  5 * time.Second,
+			WriteTimeout: 5 * time.Second,
+		}
+		go func() {
+			if err := httpRedirectSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Printf("[HTTP-Redirect] Server exit: %v", err)
+			}
+		}()
+	}
+
+	// 5. Start Server with Banner
+	transport.PrintLANBanner(bindHost, *port, lanIPs, useTLS, caPath)
+
 	go func() {
-		transport.PrintLANBanner(bindHost, *port, lanIPs, useTLS, caPath)
 		if useTLS {
 			if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
 				log.Fatalf("[FATAL] HTTPS Server listen failed: %v", err)
@@ -151,6 +198,10 @@ func main() {
 	log.Println("[SHUTDOWN] Shutting down CampusNet Gateway gracefully...")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	if httpRedirectSrv != nil {
+		_ = httpRedirectSrv.Shutdown(ctx)
+	}
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("[ERROR] Server forced to shutdown: %v", err)
 	}
