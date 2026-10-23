@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/hit-chat/campusnet/internal/auth"
@@ -27,8 +28,8 @@ func TestPendingDeviceEnumerationProtection(t *testing.T) {
 
 	// Create a pending session for Charlie
 	_, err := dfm.RequestCode(&protocol.DeviceCodeRequest{
-		ClientID: "test-cli",
-		Platform: "cli",
+		ClientID:   "test-cli",
+		Platform:   "cli",
 		UserHandle: "charlie",
 	})
 	if err != nil {
@@ -85,7 +86,7 @@ func TestRemoteSessionMintingProhibition(t *testing.T) {
 	// Remote attacker attempts to mint a token for victim Alice via /api/v1/auth/session
 	body := map[string]string{
 		"user_handle": "alice",
-		"platform": "web",
+		"platform":    "web",
 	}
 	bBytes, _ := json.Marshal(body)
 
@@ -158,7 +159,6 @@ func TestRequestBodySizeLimit(t *testing.T) {
 	}
 }
 
-
 func TestStaticPathTraversalProtection(t *testing.T) {
 	router, _, _ := setupTestRouter()
 
@@ -187,5 +187,35 @@ func TestStaticPathTraversalProtection(t *testing.T) {
 	router.Handler().ServeHTTP(spaRec, spaReq)
 	if spaRec.Code != http.StatusOK {
 		t.Fatalf("expected valid SPA route /chat to return 200 OK, got %d", spaRec.Code)
+	}
+}
+
+func TestRecoveryMiddlewareCatchesPanics(t *testing.T) {
+	panickingHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("simulated critical runtime panic inside handler")
+	})
+
+	recovered := RecoveryMiddleware(panickingHandler)
+
+	req := httptest.NewRequest(http.MethodGet, "/test-panic", nil)
+	rec := httptest.NewRecorder()
+
+	// Should not crash test process
+	recovered.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected HTTP 500 on recovered panic, got %d", rec.Code)
+	}
+
+	if rec.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("expected application/json content type, got %s", rec.Header().Get("Content-Type"))
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "internal server error") {
+		t.Fatalf("expected sanitized error message, got %s", body)
+	}
+	if strings.Contains(body, "simulated critical runtime panic") {
+		t.Fatalf("security violation: raw panic details leaked in response body!")
 	}
 }

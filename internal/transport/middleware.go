@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"strings"
 
@@ -79,6 +80,22 @@ func CORSMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		next.ServeHTTP(w, r)
+	})
+}
+
+// RecoveryMiddleware catches panics, prevents process termination, logs errors safely,
+// and returns a sanitized HTTP 500 JSON response without leaking internal stack traces.
+func RecoveryMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("[PANIC RECOVERED] Request %s %s caused panic: %v", r.Method, r.URL.Path, rec)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"error":"internal server error","status":500}`))
+			}
+		}()
 		next.ServeHTTP(w, r)
 	})
 }

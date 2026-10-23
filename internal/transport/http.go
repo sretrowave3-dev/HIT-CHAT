@@ -65,7 +65,7 @@ func NewRouter(
 }
 
 func (r *Router) Handler() http.Handler {
-	return CORSMiddleware(r.mux)
+	return RecoveryMiddleware(CORSMiddleware(r.mux))
 }
 
 func (r *Router) registerRoutes() {
