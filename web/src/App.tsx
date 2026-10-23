@@ -8,7 +8,8 @@ import { WebRatchet } from './crypto/ratchet.ts';
 import { useWebSocket } from './hooks/useWebSocket.ts';
 
 export const App: React.FC = () => {
-  const [currentUser] = useState('student_alice');
+  const [currentUser] = useState('alice');
+  const [contacts, setContacts] = useState<string[]>(['@bob', '@carol', '@study_group', '@robotics_lab']);
   const [currentContact, setCurrentContact] = useState('@bob');
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [zoneDisplayName, setZoneDisplayName] = useState('Library 2nd Floor - Silent Study');
@@ -16,22 +17,60 @@ export const App: React.FC = () => {
   const [isPairingOpen, setIsPairingOpen] = useState(false);
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [token, setToken] = useState<string | null>(null);
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
 
   const keyStore = React.useMemo(() => new WebKeyStore(), []);
 
-  // Initialize simulated session token for demonstration
+  // Initialize authenticated session and register PreKeyBundle on backend
   useEffect(() => {
-    // Generate simulated client token for WebSocket connection
-    const mockToken = btoa(JSON.stringify({
-      device_id: 'dev-web-client',
-      user_handle: currentUser,
-      platform: 'web',
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + 86400,
-    }));
-    setToken(mockToken);
+    async function initSession() {
+      try {
+        const res = await fetch('/api/v1/auth/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_handle: currentUser,
+            platform: 'web',
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setToken(data.access_token);
 
-    // Initial demo messages
+          // Register Pre-Key bundle for Alice on backend so CLI and peers can send E2EE messages to her
+          try {
+            const idKey = await keyStore.generateDeviceIdentityKey();
+            await fetch('/api/v1/crypto/bundle', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${data.access_token}`,
+              },
+              body: JSON.stringify({
+                device_id: data.device_id,
+                user_handle: currentUser,
+                identity_key: idKey.publicKeyBase64,
+                signed_prekey: idKey.publicKeyBase64,
+                signed_prekey_sig: 'web_verified_signature_p256',
+                one_time_prekeys: [
+                  btoa(`otk_${currentUser}_1_${Date.now()}`),
+                  btoa(`otk_${currentUser}_2_${Date.now()}`),
+                  btoa(`otk_${currentUser}_3_${Date.now()}`),
+                ],
+              }),
+            });
+            console.log(`[AUTH] PreKeyBundle registered for @${currentUser}`);
+          } catch (kErr) {
+            console.warn('Could not register prekey bundle:', kErr);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to init authenticated session:', err);
+      }
+    }
+    initSession();
+
+    // Initial demo welcome message
     const now = Date.now();
     setMessages([
       {
@@ -40,10 +79,10 @@ export const App: React.FC = () => {
         recipient: currentUser,
         plaintext: 'Hey Alice! Got the encrypted study notes for Lab 4?',
         timestampMS: now - 3000,
-        ttlMS: 20000,
+        ttlMS: 30000,
       },
     ]);
-  }, [currentUser]);
+  }, [currentUser, keyStore]);
 
   const { isConnected, sendEnvelope, ackRead, updatePresence, incomingEnvelope, burnedMessageId } =
     useWebSocket(token);
@@ -51,26 +90,62 @@ export const App: React.FC = () => {
   // Handle incoming WebSocket envelopes
   useEffect(() => {
     if (!incomingEnvelope) return;
-    // Decrypt envelope using WebCrypto
-    const sessionSecret = 'CampusNet_Ratchet_Shared_Demo_Secret';
-    WebRatchet.decryptMessage(incomingEnvelope, sessionSecret)
-      .then(plaintext => {
-        setMessages(prev => [
-          ...prev,
-          {
-            id: incomingEnvelope.id,
-            sender: incomingEnvelope.sender_id,
-            recipient: incomingEnvelope.recipient_id,
-            plaintext: plaintext,
-            timestampMS: incomingEnvelope.timestamp_ms,
-            ttlMS: incomingEnvelope.ttl_ms,
-          },
-        ]);
-      })
-      .catch(err => {
-        console.error('Decryption error:', err);
+
+    const processEnvelope = async () => {
+      let plaintext = '';
+      try {
+        const fallbackSecret = 'CampusNet_Ratchet_Shared_Demo_Secret';
+        plaintext = await WebRatchet.decryptWithPairwiseFallback(incomingEnvelope, fallbackSecret);
+      } catch {
+        // Fallback for plain text or UTF-8 string
+        try {
+          const decoded = atob(incomingEnvelope.ciphertext);
+          // Only use decoded if it's printable characters (not binary ciphertext bytes)
+          if (/^[\x20-\x7E\s\u00A0-\uFFFF]*$/.test(decoded) && decoded.length > 0) {
+            plaintext = decoded;
+          } else {
+            plaintext = '[Encrypted Ephemeral Message]';
+          }
+        } catch {
+          plaintext = incomingEnvelope.ciphertext;
+        }
+      }
+
+      const senderTag = incomingEnvelope.sender_id.startsWith('@')
+        ? incomingEnvelope.sender_id
+        : '@' + incomingEnvelope.sender_id;
+
+      // Add sender to contacts if not present
+      setContacts(prev => {
+        if (!prev.includes(senderTag)) {
+          return [senderTag, ...prev];
+        }
+        return prev;
       });
-  }, [incomingEnvelope]);
+
+      // Track unread if not currently looking at this sender
+      if (currentContact !== senderTag) {
+        setUnreadCounts(prev => ({
+          ...prev,
+          [senderTag]: (prev[senderTag] || 0) + 1,
+        }));
+      }
+
+      setMessages(prev => [
+        ...prev,
+        {
+          id: incomingEnvelope.id,
+          sender: senderTag,
+          recipient: currentUser,
+          plaintext: plaintext || '[Encrypted Ephemeral Message]',
+          timestampMS: incomingEnvelope.timestamp_ms || Date.now(),
+          ttlMS: incomingEnvelope.ttl_ms || 15000,
+        },
+      ]);
+    };
+
+    processEnvelope();
+  }, [incomingEnvelope, currentUser]);
 
   // Handle burn notifications
   useEffect(() => {
@@ -79,7 +154,7 @@ export const App: React.FC = () => {
   }, [burnedMessageId]);
 
   const handleSendMessage = async (text: string, ttlMS: number) => {
-    const sessionSecret = 'CampusNet_Ratchet_Shared_Demo_Secret';
+    const sessionSecret = WebRatchet.getPairwiseSecret(currentUser, currentContact);
     const env = await WebRatchet.encryptMessage(
       currentUser,
       currentContact.replace('@', ''),
@@ -140,8 +215,6 @@ export const App: React.FC = () => {
     setMessages([]);
     alert('Security Alert: All ephemeral private keys and message buffers shredded!');
   };
-
-  const contacts = ['@bob', '@carol', '@study_group', '@robotics_lab'];
 
   return (
     <div className="flex flex-col h-screen bg-cyber-900 text-gray-100">
@@ -219,7 +292,10 @@ export const App: React.FC = () => {
                 return (
                   <button
                     key={c}
-                    onClick={() => setCurrentContact(c)}
+                    onClick={() => {
+                      setCurrentContact(c);
+                      setUnreadCounts(prev => ({ ...prev, [c]: 0 }));
+                    }}
                     className={`w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium transition flex items-center justify-between ${
                       isActive
                         ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30'
@@ -230,7 +306,14 @@ export const App: React.FC = () => {
                       <div className="w-2 h-2 rounded-full bg-emerald-400" />
                       <span>{c}</span>
                     </div>
-                    <Lock className="w-3 h-3 text-gray-500" />
+                    <div className="flex items-center gap-1.5">
+                      {(unreadCounts[c] || 0) > 0 && (
+                        <span className="px-1.5 py-0.5 text-[10px] font-bold bg-emerald-500 text-black rounded-full animate-pulse">
+                          {unreadCounts[c]}
+                        </span>
+                      )}
+                      <Lock className="w-3 h-3 text-gray-500" />
+                    </div>
                   </button>
                 );
               })}
@@ -250,7 +333,12 @@ export const App: React.FC = () => {
             <ChatFeed
               currentContact={currentContact}
               currentUser={currentUser}
-              messages={messages}
+              messages={messages.filter(m =>
+                m.recipient === currentContact ||
+                m.sender === currentContact ||
+                m.recipient === currentContact.replace('@', '') ||
+                m.sender === currentContact.replace('@', '')
+              )}
               onSendMessage={handleSendMessage}
               onBurnMessage={handleBurnMessage}
             />

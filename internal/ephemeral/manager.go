@@ -17,6 +17,7 @@ var (
 type Store interface {
 	StoreEnvelope(ctx context.Context, env *protocol.Envelope) error
 	GetEnvelope(ctx context.Context, id string) (*protocol.Envelope, error)
+	GetPendingEnvelopesForRecipient(ctx context.Context, recipient string) ([]*protocol.Envelope, error)
 	BurnEnvelope(ctx context.Context, id string) error
 	Close() error
 }
@@ -60,6 +61,11 @@ func (m *Manager) RetrieveEnvelope(ctx context.Context, id string) (*protocol.En
 		return nil, ErrEnvelopeNotFound
 	}
 	return env, nil
+}
+
+// GetPendingForRecipient retrieves all unexpired pending envelopes destined for recipient.
+func (m *Manager) GetPendingForRecipient(ctx context.Context, recipient string) ([]*protocol.Envelope, error) {
+	return m.store.GetPendingEnvelopesForRecipient(ctx, recipient)
 }
 
 // BurnOnRead triggers an immediate cryptographic unlink and zeroing of the envelope.

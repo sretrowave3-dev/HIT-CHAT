@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"strings"
 	"sync"
 
 	"github.com/hit-chat/campusnet/pkg/protocol"
@@ -54,17 +55,25 @@ func (b *BundleRegistry) RegisterBundle(bundle *protocol.PreKeyBundle) error {
 
 	b.bundles[bundle.DeviceID] = sb
 
-	// Map handle
+	// Map handle and aliases
 	if bundle.UserHandle != "" {
-		found := false
-		for _, did := range b.handleToDevs[bundle.UserHandle] {
-			if did == bundle.DeviceID {
-				found = true
-				break
-			}
+		clean := strings.TrimPrefix(strings.ToLower(bundle.UserHandle), "@")
+		aliases := []string{clean}
+		if strings.HasPrefix(clean, "student_") {
+			aliases = append(aliases, strings.TrimPrefix(clean, "student_"))
+		} else {
+			aliases = append(aliases, "student_"+clean)
 		}
-		if !found {
-			b.handleToDevs[bundle.UserHandle] = append(b.handleToDevs[bundle.UserHandle], bundle.DeviceID)
+
+		for _, alias := range aliases {
+			var updated []string
+			for _, did := range b.handleToDevs[alias] {
+				if did != bundle.DeviceID {
+					updated = append(updated, did)
+				}
+			}
+			// Place latest device at index 0
+			b.handleToDevs[alias] = append([]string{bundle.DeviceID}, updated...)
 		}
 	}
 
@@ -76,12 +85,26 @@ func (b *BundleRegistry) FetchBundle(targetID string) (*protocol.PreKeyBundle, e
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Target can be either deviceID or @userHandle
+	// Clean target: remove '@' and lowercase
+	clean := strings.TrimPrefix(strings.ToLower(targetID), "@")
+
 	var sb *storedBundle
-	if dev, ok := b.bundles[targetID]; ok {
+	if dev, ok := b.bundles[clean]; ok {
 		sb = dev
-	} else if devs, ok := b.handleToDevs[targetID]; ok && len(devs) > 0 {
-		sb = b.bundles[devs[0]] // Return primary device
+	} else if dev, ok := b.bundles[targetID]; ok {
+		sb = dev
+	} else if devs, ok := b.handleToDevs[clean]; ok && len(devs) > 0 {
+		sb = b.bundles[devs[0]] // Return primary / latest device
+	} else if strings.HasPrefix(clean, "student_") {
+		trimmed := strings.TrimPrefix(clean, "student_")
+		if devs, ok := b.handleToDevs[trimmed]; ok && len(devs) > 0 {
+			sb = b.bundles[devs[0]]
+		}
+	} else {
+		studentAlias := "student_" + clean
+		if devs, ok := b.handleToDevs[studentAlias]; ok && len(devs) > 0 {
+			sb = b.bundles[devs[0]]
+		}
 	}
 
 	if sb == nil {

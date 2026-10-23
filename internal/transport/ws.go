@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -65,7 +66,29 @@ func (h *Hub) Run() {
 			h.mu.Lock()
 			h.clients[client] = true
 			h.byDevice[client.deviceID] = client
-			h.byUser[client.userHandle] = append(h.byUser[client.userHandle], client)
+
+			clean := strings.TrimPrefix(strings.ToLower(client.userHandle), "@")
+			aliasMap := make(map[string]bool)
+			aliasMap[client.userHandle] = true
+			aliasMap[clean] = true
+			if strings.HasPrefix(clean, "student_") {
+				aliasMap[strings.TrimPrefix(clean, "student_")] = true
+			} else {
+				aliasMap["student_"+clean] = true
+			}
+
+			for alias := range aliasMap {
+				alreadyPresent := false
+				for _, c := range h.byUser[alias] {
+					if c == client {
+						alreadyPresent = true
+						break
+					}
+				}
+				if !alreadyPresent {
+					h.byUser[alias] = append(h.byUser[alias], client)
+				}
+			}
 			h.mu.Unlock()
 			log.Printf("[WS HUB] Connected device: %s (user: %s)", client.deviceID, client.userHandle)
 
@@ -75,18 +98,30 @@ func (h *Hub) Run() {
 				delete(h.clients, client)
 				delete(h.byDevice, client.deviceID)
 
-				// Remove from user slice
-				userList := h.byUser[client.userHandle]
-				var updated []*Client
-				for _, c := range userList {
-					if c != client {
-						updated = append(updated, c)
-					}
-				}
-				if len(updated) == 0 {
-					delete(h.byUser, client.userHandle)
+				// Remove from all user alias slices
+				clean := strings.TrimPrefix(strings.ToLower(client.userHandle), "@")
+				aliasMap := make(map[string]bool)
+				aliasMap[client.userHandle] = true
+				aliasMap[clean] = true
+				if strings.HasPrefix(clean, "student_") {
+					aliasMap[strings.TrimPrefix(clean, "student_")] = true
 				} else {
-					h.byUser[client.userHandle] = updated
+					aliasMap["student_"+clean] = true
+				}
+
+				for alias := range aliasMap {
+					userList := h.byUser[alias]
+					var updated []*Client
+					for _, c := range userList {
+						if c != client {
+							updated = append(updated, c)
+						}
+					}
+					if len(updated) == 0 {
+						delete(h.byUser, alias)
+					} else {
+						h.byUser[alias] = updated
+					}
 				}
 
 				close(client.send)
@@ -131,6 +166,22 @@ func (h *Hub) ServeWS(tokenMgr *auth.TokenManager, w http.ResponseWriter, r *htt
 
 	go client.writePump()
 	go client.readPump()
+
+	// Deliver any pending offline ephemeral envelopes for this user
+	go func() {
+		time.Sleep(50 * time.Millisecond) // Ensure writePump loop has begun
+		ctx := context.Background()
+		pending, err := h.ephemeralMgr.GetPendingForRecipient(ctx, client.userHandle)
+		if err == nil && len(pending) > 0 {
+			for _, env := range pending {
+				client.sendFrame(&protocol.StreamFrame{
+					Op:       protocol.OpDeliverEnvelope,
+					Envelope: env,
+				})
+			}
+			log.Printf("[WS HUB] Flushed %d pending ephemeral messages for %s", len(pending), client.userHandle)
+		}
+	}()
 }
 
 func (c *Client) readPump() {
@@ -176,7 +227,19 @@ func (c *Client) handleFrame(frame *protocol.StreamFrame) {
 			return
 		}
 
-		// Ensure sender ID matches authenticated claims
+		// Enforce server-side authoritative timestamp (defends against clock skew & expiration bypass)
+		frame.Envelope.TimestampMS = time.Now().UTC().UnixMilli()
+
+		// Clamp TTL bounds: min 1 second (1000ms), max 24 hours (86400000ms)
+		if frame.Envelope.TTLMilliseconds <= 0 {
+			frame.Envelope.TTLMilliseconds = 10000
+		} else if frame.Envelope.TTLMilliseconds > 86400000 {
+			frame.Envelope.TTLMilliseconds = 86400000
+		} else if frame.Envelope.TTLMilliseconds < 1000 {
+			frame.Envelope.TTLMilliseconds = 1000
+		}
+
+		// Ensure sender ID strictly matches authenticated claims
 		frame.Envelope.SenderID = c.userHandle
 
 		// Save in ephemeral store with TTL
@@ -259,6 +322,9 @@ func (c *Client) sendFrame(frame *protocol.StreamFrame) {
 	if err != nil {
 		return
 	}
+	defer func() {
+		_ = recover() // Safely guard against race condition if client disconnected and channel closed
+	}()
 	select {
 	case c.send <- data:
 	default:
@@ -287,24 +353,43 @@ func (h *Hub) routeEnvelope(env *protocol.Envelope) bool {
 	}
 
 	delivered := false
+	deliveredClients := make(map[*Client]bool)
+	cleanTarget := strings.TrimPrefix(strings.ToLower(env.RecipientID), "@")
 
-	// Try routing by deviceID directly
-	if client, ok := h.byDevice[env.RecipientID]; ok {
-		select {
-		case client.send <- data:
-			delivered = true
-		default:
+	deliverTo := func(target string) {
+		if client, ok := h.byDevice[target]; ok {
+			if !deliveredClients[client] {
+				select {
+				case client.send <- data:
+					delivered = true
+					deliveredClients[client] = true
+				default:
+				}
+			}
+		}
+		if clients, ok := h.byUser[target]; ok {
+			for _, client := range clients {
+				if !deliveredClients[client] {
+					select {
+					case client.send <- data:
+						delivered = true
+						deliveredClients[client] = true
+					default:
+					}
+				}
+			}
 		}
 	}
 
-	// Also try routing by userHandle
-	if clients, ok := h.byUser[env.RecipientID]; ok {
-		for _, client := range clients {
-			select {
-			case client.send <- data:
-				delivered = true
-			default:
-			}
+	deliverTo(env.RecipientID)
+	if !delivered {
+		deliverTo(cleanTarget)
+	}
+	if !delivered {
+		if strings.HasPrefix(cleanTarget, "student_") {
+			deliverTo(strings.TrimPrefix(cleanTarget, "student_"))
+		} else {
+			deliverTo("student_" + cleanTarget)
 		}
 	}
 

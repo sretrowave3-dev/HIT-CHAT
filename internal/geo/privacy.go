@@ -38,9 +38,26 @@ func (f *ZeroBypassPrivacyFilter) SanitizePresence(userHandle string, req *proto
 	displayZone := req.DisplayZone
 	buildingName := req.BuildingName
 	floorLevel := req.FloorLevel
+	bHash := req.BSSIDHash
 
-	if req.BSSIDHash != "" {
-		if zone, found := f.resolver.ResolveZone(req.BSSIDHash); found {
+	if bHash != "" {
+		// Zero-Knowledge Privacy Invariant: raw physical MACs are NEVER leaked or broadcast.
+		// If client passed a raw MAC (e.g. colon/dash separated or short string) rather than HMAC-SHA256,
+		// hash it immediately using the campus salt.
+		isHex64 := len(bHash) == 64
+		if isHex64 {
+			for _, c := range bHash {
+				if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+					isHex64 = false
+					break
+				}
+			}
+		}
+		if !isHex64 {
+			bHash = f.resolver.HashBSSID(bHash)
+		}
+
+		if zone, found := f.resolver.ResolveZone(bHash); found {
 			zoneCode = zone.ZoneCode
 			displayZone = zone.DisplayName
 			buildingName = zone.BuildingName
@@ -50,7 +67,7 @@ func (f *ZeroBypassPrivacyFilter) SanitizePresence(userHandle string, req *proto
 
 	return &protocol.PresencePayload{
 		UserHandle:      userHandle,
-		BSSIDHash:       req.BSSIDHash,
+		BSSIDHash:       bHash,
 		ZoneCode:        zoneCode,
 		DisplayZone:     displayZone,
 		BuildingName:    buildingName,

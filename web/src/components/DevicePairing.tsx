@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Terminal, Check, AlertCircle, X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Terminal, Check, AlertCircle, X, Zap } from 'lucide-react';
 
 interface DevicePairingProps {
   userHandle: string;
@@ -15,29 +15,50 @@ export const DevicePairing: React.FC<DevicePairingProps> = ({
   const [userCode, setUserCode] = useState('');
   const [status, setStatus] = useState<'idle' | 'authorizing' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
+  const [pendingDevices, setPendingDevices] = useState<any[]>([]);
 
-  if (!isOpen) return null;
+  // Check for pending terminal devices on open
+  useEffect(() => {
+    if (!isOpen) return;
+    const fetchPending = async () => {
+      try {
+        const res = await fetch('/api/v1/auth/device/pending');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.pending_devices && data.pending_devices.length > 0) {
+            setPendingDevices(data.pending_devices);
+            setUserCode(data.pending_devices[0].user_code);
+          } else {
+            setPendingDevices([]);
+          }
+        }
+      } catch {
+        // Ignore network errors on background poll
+      }
+    };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!userCode.trim()) return;
+    fetchPending();
+    const interval = setInterval(fetchPending, 3000);
+    return () => clearInterval(interval);
+  }, [isOpen]);
 
+  const handleAutoAuthorize = async (code?: string) => {
     setStatus('authorizing');
     setErrorMessage('');
 
     try {
-      const res = await fetch('/api/v1/auth/device/verify', {
+      const res = await fetch('/api/v1/auth/device/auto', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_code: userCode.trim().toUpperCase(),
+          user_code: (code || userCode || '').trim().toUpperCase(),
           user_handle: userHandle,
         }),
       });
 
       if (!res.ok) {
         const data = await res.json();
-        throw new Error(data.error || 'Failed to authorize device');
+        throw new Error(data.error || 'Failed to auto-authorize device');
       }
 
       setStatus('success');
@@ -48,8 +69,16 @@ export const DevicePairing: React.FC<DevicePairingProps> = ({
       }, 1500);
     } catch (err: any) {
       setStatus('error');
-      setErrorMessage(err.message || 'Verification error');
+      setErrorMessage(err.message || 'Auto-authorization error');
     }
+  };
+
+  if (!isOpen) return null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userCode.trim()) return;
+    await handleAutoAuthorize(userCode);
   };
 
   return (
@@ -71,6 +100,30 @@ export const DevicePairing: React.FC<DevicePairingProps> = ({
             <p className="text-xs text-gray-400">Link headless terminal session to @{userHandle}</p>
           </div>
         </div>
+
+        {/* Pending Terminal Detection Banner */}
+        {pendingDevices.length > 0 && (
+          <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl mb-4 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                <Zap className="w-3.5 h-3.5" />
+                <span>Pending Terminal Detected</span>
+              </div>
+              <div className="text-xs font-mono text-gray-300 mt-0.5">
+                Code: <span className="text-emerald-300 font-bold">{pendingDevices[0].user_code}</span> ({pendingDevices[0].platform})
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={status === 'authorizing'}
+              onClick={() => handleAutoAuthorize(pendingDevices[0].user_code)}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-md transition whitespace-nowrap flex items-center gap-1"
+            >
+              <Zap className="w-3 h-3" />
+              <span>1-Click Authorize</span>
+            </button>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -116,6 +169,20 @@ export const DevicePairing: React.FC<DevicePairingProps> = ({
               {status === 'authorizing' ? 'Verifying...' : 'Authorize Device'}
             </button>
           </div>
+
+          {pendingDevices.length === 0 && (
+            <div className="pt-2 text-center border-t border-gray-700/50">
+              <button
+                type="button"
+                disabled={status === 'authorizing'}
+                onClick={() => handleAutoAuthorize()}
+                className="text-xs text-emerald-400 hover:text-emerald-300 font-medium flex items-center justify-center gap-1.5 w-full py-1 transition"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>⚡ Auto-Authorize Any Pending Terminal</span>
+              </button>
+            </div>
+          )}
         </form>
       </div>
     </div>

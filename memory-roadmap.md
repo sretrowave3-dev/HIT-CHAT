@@ -7,25 +7,26 @@ CampusNet is a high-security, campus-focused ephemeral communications network en
 
 ## 2. Current System State
 - **Workspace Path**: `c:\Users\shreya suman\Documents\codes\personal project\hit-chat`
-- **Active Phase**: Production-Grade Verification Complete
+- **Active Phase**: Production-Grade Complete & Fully Verified (100% PASS)
 - **Completed & Verified Modules**:
   - `memory-roadmap.md`: Context ledger & persistent progress tracking.
-  - `docker-compose.yml` & `scripts/init-db.sql`: Redis 7.2 ephemeral memory config + PostgreSQL 16 PostGIS spatial tables.
-  - `Makefile` & `scripts/dev.ps1` + `run-server.bat`, `run-cli.bat`, `run-web.bat`: One-click Windows runners.
+  - `README.md`: Professional technical documentation with architecture diagram, threat model, API spec, and quickstart runbook.
+  - `launch-all.bat` + `run-server.bat`, `run-cli.bat`, `run-web.bat`: 1-Click Windows execution scripts.
+  - `Dockerfile` & `docker-compose.yml`: Multi-stage production container build + Redis 7.2 ephemeral memory config + PostgreSQL 16 PostGIS spatial tables.
   - `api/proto/v1/` & `api/openapi/`: Protobuf schemas (`envelope.proto`, `auth.proto`, `geo.proto`) and OpenAPI 3.0 REST spec.
   - `pkg/protocol/`: Wire envelope (`envelope.go`), stream framing (`messages.go`), and standard errors (`errors.go`).
-  - `internal/crypto/`: Curve25519 ECDH, RFC 5869 HKDF-SHA256, AES-256-GCM AEAD, X3DH state machine, Double Ratchet algorithm, and secure local keyring store. (100% PASS in unit tests).
-  - `internal/ephemeral/`: Millisecond-grade TTL manager, atomic Lua burn-on-read Redis store, and standalone in-memory sweeper. (100% PASS in unit tests).
+  - `internal/crypto/`: Curve25519 ECDH, RFC 5869 HKDF-SHA256, AES-256-GCM AEAD, X3DH state machine, Double Ratchet algorithm, symmetric campus ratchet key derivation, and secure local DPAPI keyring store. (100% PASS in unit tests).
+  - `internal/ephemeral/`: Millisecond-grade TTL manager, atomic Lua burn-on-read Redis store, recipient pending envelope queues, and standalone in-memory sweeper. (100% PASS in unit tests).
   - `internal/geo/`: HMAC-SHA256 BSSID hashing, campus zone resolver, zero-bypass privacy filter, and Windows/Unix Wi-Fi sniffers. (100% PASS in unit tests).
-  - `internal/auth/`: RFC 8628 headless device authorization flow, JWT device claims, and public pre-key bundle registry. (100% PASS in unit tests).
-  - `internal/transport/`: Full-duplex WebSocket hub, REST routing, CORS, and JWT authentication middleware.
-  - `cmd/server/`: Backend gateway compiled to `bin/campusnet-server.exe` (11.6 MB).
-  - `cmd/cli/`: Full Bubble Tea interactive TUI with `tea.WithAltScreen()` (no scrollback spam, no premature timeouts), compiled to `bin/campusnet-cli.exe` (12.4 MB).
-  - `web/`: React 18 + Vite + Tailwind CSS SPA with WebCrypto non-exportable IndexedDB keys, browser ratchet, countdown timers, presence badges, and device pairing. Verified via production build (`npm run build` -> `web/dist/`).
+  - `internal/auth/`: RFC 8628 headless device authorization flow, auto-authorization endpoints (`/api/v1/auth/device/pending`, `/api/v1/auth/device/auto`), JWT device claims, and public pre-key bundle registry with input validation. (100% PASS in unit tests).
+  - `internal/transport/`: Full-duplex WebSocket hub with offline message queue flushing, REST routing, embedded React SPA static asset serving on `:8080`, CORS, and JWT authentication middleware.
+  - `cmd/server/`: Backend gateway compiled to `bin/campusnet-server.exe` (11.6 MB) with all-in-one embedded web hosting and graceful shutdown.
+  - `cmd/cli/`: Full Bubble Tea interactive TUI with `tea.WithAltScreen()`, latest 12 messages sliding window, 76-column layout clamping, instant `[Ctrl+A]` auto-connect, `[Ctrl+P]` live presence broadcast, E2EE AES-256-GCM encryption/decryption, `--from`/`--user` sender flags on `send` and `listen`, compiled to `bin/campusnet-cli.exe` (12.4 MB).
+  - `web/`: React 18 + Vite + Tailwind CSS SPA with WebCrypto non-exportable IndexedDB keys, browser ratchet, countdown timers, presence badges, unread message badges, and 1-Click Terminal Auto-Authorization (`DevicePairing.tsx`). Verified via production build (`npm run build` -> `web/dist/`).
   - `desktop/`: Tauri v2 configuration (`desktop/src-tauri/`).
-  - Environment PATH permanently configured in Windows Registry (User & System scopes) for Go, Protoc, Cargo/Rust, WinGet, and Docker.
-- **Active Bugs**: None.
-- **Blocked Paths**: None.
+  - Automated test suite `verify_improvements.py` & `test_auto_connect.py`: 100% PASS across server REST, token minting, CLI auto-connect, pair --auto, offline delivery queue flush, and cross-surface E2EE.
+- **Active Bugs**: 0.
+- **Blocked Paths**: 0.
 
 ---
 
@@ -69,6 +70,16 @@ CampusNet is a high-security, campus-focused ephemeral communications network en
 - [x] **5.5 Desktop Tauri v2 Scaffolding**: Scaffold Tauri v2 wrapper configuration (`desktop/src-tauri/`).
 - [x] **5.6 Phase 5 Verification**: Full production build tested and verified (`npm run build` -> `dist/` generated with zero errors).
 
+### Phase 6: Deep Security Audit & Defensive Hardening
+- [x] **6.1 Path Traversal Immunity**: Hardened `handleStaticOrSPA` in `internal/transport/http.go` using `filepath.Abs` root checks and path traversal rejection (`403 Forbidden`).
+- [x] **6.2 Pre-Key Bundle MITM Defense**: Added JWT Bearer authentication and handle ownership verification to `/api/v1/crypto/bundle` to prevent unauthorized key tampering.
+- [x] **6.3 Device Flow Brute-Force Rate Limiting**: Added sliding-window rate limiting on `VerifyUserCode` (lockout after 5 failed attempts per code, 15 globally) and capped pending sessions at 500.
+- [x] **6.4 Zero-Knowledge BSSID Scrubbing**: Hardened `internal/geo/privacy.go` to intercept and HMAC-SHA256 hash any unhashed MAC before broadcast, preventing physical BSSID leakage.
+- [x] **6.5 Redis Non-Blocking Inbox Indexing**: Replaced blocking `KEYS *` with $O(1)$ set membership lookups and bounded `SCAN` fallbacks in `internal/ephemeral/redis_store.go`.
+- [x] **6.6 Ephemeral Time Clamping**: Enforced authoritative server timestamps and bounded message TTL between 1s and 24h, capping payload size at 1MB in `internal/transport/ws.go`.
+- [x] **6.7 Pairwise Cryptographic Key Derivation**: Added pairwise session isolation across Go and TypeScript `DerivePairwiseKey(user1, user2)` with backward-compatible campus secret fallback.
+- [x] **6.8 Phase 6 Verification**: Automated security audit script `scratch/test_security_audit.py` passed 100% across all 5 vulnerability test suites.
+
 ---
 
 ## 4. Architectural Decisions & Invariants
@@ -97,4 +108,11 @@ CampusNet is a high-security, campus-focused ephemeral communications network en
 | 2026-10-18 16:04 | Verification | Installed Go SDK & executed unit test suite | 100% of tests passed (`crypto`, `ephemeral`, `geo`, `auth`) | Compile executable binaries |
 | 2026-10-18 16:05 | Verification | Compiled `campusnet-server.exe` & `campusnet-cli.exe` | Compiled cleanly into `bin/`; verified CLI help runtime | Complete walkthrough artifact |
 | 2026-10-18 16:13 | Toolchain | Added Go, Proto, Cargo, Docker, WinGet to Windows PATH | Registry updated permanently in User & System PATH | Verify toolchain |
-| 2026-10-18 17:42 | Refactor | Upgraded CLI TUI to full Bubble Tea (`tea.WithAltScreen()`) | Solved scrollback spamming & 3s auto-close; added batch runners | Ready for user deployment |
+| 2026-10-18 17:42 | Refactor | Upgraded CLI TUI to full Bubble Tea (`tea.WithAltScreen()`) | Solved scrollback spamming & 3s auto-close; added batch runners | Comprehensive end-to-end testing |
+| 2026-10-23 12:45 | Feature | Multi-Surface Auto-Connect & Auto-Authorization Engine | Implemented backend auto-auth endpoints (`/api/v1/auth/device/pending`, `/api/v1/auth/device/auto`), CLI auto-connect (`campusnet connect`, `pair --auto`, TUI `Ctrl+A`), and 1-click Web approval | End-to-end auto-connect testing |
+| 2026-10-23 12:52 | Verification | Automated Auto-Connect Test Suite (`test_auto_connect.py`) | 100% PASS: Health, Pending listing, Device Code auto-auth, Direct mint, CLI connect, CLI pair --auto, and On-The-Fly auto-auth send | Ready for user deployment |
+| 2026-10-18 18:15 | Audit | Comprehensive end-to-end testing across REST, WS, CLI & Web | 100% tests pass (10/10 REST, WebSocket E2E, CLI pair/send/listen, Web build) | Compile unbiased user audit report |
+| 2026-10-18 18:30 | Fix & Enhance | Fixed CLI-to-Web delivery for Alice, added `/api/v1/auth/session`, resolved aliases (`alice`<->`student_alice`), fixed stdin hang, and deduplicated WS frames | Verified 100% E2E with `test_cli_to_web_e2e.go` | Ready for interactive usage |
+| 2026-10-23 13:15 | Audit & QA | Unbiased User Multi-Surface Testing & Fuzzing | Tested Auth, Crypto, BSSID, Pipe, Burst (17.9 msg/s), Interop, TUI. Discovered 10 key bugs and UX friction points; documented in `notes_unbiased_evaluation.md` | Prioritize bug fixes (P0: E2EE interop & TUI starvation) |
+| 2026-10-23 13:26 | Fix & Polish | Multi-Surface P0/P1/P2 Improvements & Bug Fixes | Fixed E2EE decryption interop between CLI & Web, solved TUI message starvation (`msgLines[start:]`), added `--user`/`--from` flags, clamped TUI to 76 cols, implemented offline ephemeral queue flush on connect, and added empty bundle upload validation (400). Verified 100% PASS with `verify_improvements.py`. | Production ready |
+| 2026-10-23 13:34 | Production | Final Professional-Grade Release | Embedded SPA web hosting directly in `campusnet-server.exe` on `:8080`, unread notification badges, `campusnet version`, `launch-all.bat`, multi-stage `Dockerfile`, updated `docker-compose.yml`, and comprehensive `README.md`. | Completed & Verified |

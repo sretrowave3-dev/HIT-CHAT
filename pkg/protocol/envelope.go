@@ -70,6 +70,9 @@ func (e *Envelope) Validate() error {
 	if len(e.Ciphertext) == 0 {
 		return errors.New("empty ciphertext payload")
 	}
+	if len(e.Ciphertext) > 1048576 {
+		return errors.New("ciphertext payload exceeds maximum size limit of 1MB")
+	}
 	return nil
 }
 

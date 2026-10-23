@@ -67,12 +67,12 @@ func main() {
 
 	router := transport.NewRouter(deviceFlowMgr, bundleRegistry, tokenMgr, geoResolver, privacyFilter)
 
-	// 4. Register WebSocket stream handler
+	// 4. Register WebSocket stream handler and REST/SPA router
 	mainMux := http.NewServeMux()
-	mainMux.Handle("/api/v1/", router.Handler())
 	mainMux.HandleFunc("/ws/v1/stream", func(w http.ResponseWriter, r *http.Request) {
 		hub.ServeWS(tokenMgr, w, r)
 	})
+	mainMux.Handle("/", router.Handler())
 
 	serverAddr := fmt.Sprintf(":%d", *port)
 	srv := &http.Server{

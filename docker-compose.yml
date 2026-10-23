@@ -38,6 +38,24 @@ services:
       timeout: 3s
       retries: 5
 
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: campusnet-gateway
+    environment:
+      - PORT=8080
+      - REDIS_ADDR=redis:6379
+      - JWT_SECRET=campusnet-production-session-secret-change-in-prod
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   pgdata:
     driver: local

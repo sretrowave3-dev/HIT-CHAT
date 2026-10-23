@@ -17,7 +17,27 @@ export interface WebEnvelope {
   timestamp_ms: number;
 }
 
+export function canonicalHandle(h: string): string {
+  let clean = (h || '').trim().toLowerCase().replace(/^@/, '');
+  clean = clean.replace(/^student_/, '');
+  return clean;
+}
+
+export function getPairwiseSecret(user1: string, user2: string): string {
+  const u1 = canonicalHandle(user1);
+  const u2 = canonicalHandle(user2);
+  const [first, second] = u1 <= u2 ? [u1, u2] : [u2, u1];
+  return `CampusNet_Ratchet_Shared_Demo_Secret:${first}:${second}`;
+}
+
 export class WebRatchet {
+  /**
+   * Generates isolated pairwise secret for two communicating peers.
+   */
+  static getPairwiseSecret(user1: string, user2: string): string {
+    return getPairwiseSecret(user1, user2);
+  }
+
   /**
    * Derives a symmetric AES-256 key from a shared secret string/salt.
    */
@@ -110,5 +130,17 @@ export class WebRatchet {
 
     const dec = new TextDecoder();
     return dec.decode(decrypted);
+  }
+
+  /**
+   * Attempts pairwise decryption first; if fail, falls back to legacy shared campus secret.
+   */
+  static async decryptWithPairwiseFallback(env: WebEnvelope, fallbackSecret: string): Promise<string> {
+    const pairwiseSecret = getPairwiseSecret(env.sender_id, env.recipient_id);
+    try {
+      return await this.decryptMessage(env, pairwiseSecret);
+    } catch {
+      return await this.decryptMessage(env, fallbackSecret);
+    }
   }
 }

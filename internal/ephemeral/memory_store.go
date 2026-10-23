@@ -2,6 +2,7 @@ package ephemeral
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,6 +58,25 @@ func (m *MemoryStore) GetEnvelope(ctx context.Context, id string) (*protocol.Env
 		return nil, ErrEnvelopeNotFound
 	}
 	return rec.env, nil
+}
+
+func (m *MemoryStore) GetPendingEnvelopesForRecipient(ctx context.Context, recipient string) ([]*protocol.Envelope, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	now := time.Now()
+	cleanRecipient := strings.TrimPrefix(strings.ToLower(recipient), "@")
+	var result []*protocol.Envelope
+
+	for _, rec := range m.items {
+		if now.Before(rec.expiresAt) && rec.env != nil {
+			target := strings.TrimPrefix(strings.ToLower(rec.env.RecipientID), "@")
+			if target == cleanRecipient || target == "student_"+cleanRecipient || cleanRecipient == "student_"+target {
+				result = append(result, rec.env)
+			}
+		}
+	}
+	return result, nil
 }
 
 func (m *MemoryStore) BurnEnvelope(ctx context.Context, id string) error {

@@ -15,6 +15,11 @@ var (
 	ErrInvalidUserCode   = errors.New("invalid or expired user verification code")
 	ErrCodeAlreadyUsed   = errors.New("device code already authorized")
 	ErrDeviceFlowExpired = errors.New("device authorization request has expired")
+	ErrTooManyAttempts   = errors.New("too many failed verification attempts, please retry later")
+)
+
+const (
+	MaxPendingSessions = 500
 )
 
 type DeviceAuthorizationState string
@@ -27,16 +32,17 @@ const (
 )
 
 type PendingDeviceSession struct {
-	DeviceCode        string
-	UserCode          string
-	ClientID          string
-	Platform          string
-	PublicIdentityKey string
-	State             DeviceAuthorizationState
-	UserHandle        string
-	DeviceID          string
-	ExpiresAt         time.Time
-	CreatedAt         time.Time
+	DeviceCode          string
+	UserCode            string
+	ClientID            string
+	Platform            string
+	PublicIdentityKey   string
+	RequestedUserHandle string
+	State               DeviceAuthorizationState
+	UserHandle          string
+	DeviceID            string
+	ExpiresAt           time.Time
+	CreatedAt           time.Time
 }
 
 // DeviceFlowManager implements the RFC 8628 Device Authorization Flow.
@@ -44,6 +50,8 @@ type DeviceFlowManager struct {
 	mu              sync.RWMutex
 	byDeviceCode    map[string]*PendingDeviceSession
 	byUserCode      map[string]*PendingDeviceSession
+	failedAttempts  map[string]int
+	lastFailedReset time.Time
 	tokenManager    *TokenManager
 	verificationURI string
 }
@@ -56,6 +64,8 @@ func NewDeviceFlowManager(tokenMgr *TokenManager, verificationURI string) *Devic
 	dfm := &DeviceFlowManager{
 		byDeviceCode:    make(map[string]*PendingDeviceSession),
 		byUserCode:      make(map[string]*PendingDeviceSession),
+		failedAttempts:  make(map[string]int),
+		lastFailedReset: time.Now(),
 		tokenManager:    tokenMgr,
 		verificationURI: verificationURI,
 	}
@@ -69,19 +79,45 @@ func (d *DeviceFlowManager) RequestCode(req *protocol.DeviceCodeRequest) (*proto
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
+	// Enforce capacity bounds to defend against memory exhaustion DoS attacks
+	if len(d.byDeviceCode) >= MaxPendingSessions {
+		now := time.Now()
+		for code, s := range d.byDeviceCode {
+			if now.After(s.ExpiresAt) {
+				delete(d.byDeviceCode, code)
+				delete(d.byUserCode, s.UserCode)
+			}
+		}
+		if len(d.byDeviceCode) >= MaxPendingSessions {
+			var oldestCode string
+			var oldestTime time.Time
+			for code, s := range d.byDeviceCode {
+				if oldestTime.IsZero() || s.CreatedAt.Before(oldestTime) {
+					oldestTime = s.CreatedAt
+					oldestCode = code
+				}
+			}
+			if s, ok := d.byDeviceCode[oldestCode]; ok {
+				delete(d.byUserCode, s.UserCode)
+				delete(d.byDeviceCode, oldestCode)
+			}
+		}
+	}
+
 	deviceCode := generateRandomHex(16)
 	userCode := generateHumanCode()
 	expiresIn := 600 // 10 minutes
 
 	session := &PendingDeviceSession{
-		DeviceCode:        deviceCode,
-		UserCode:          userCode,
-		ClientID:          req.ClientID,
-		Platform:          req.Platform,
-		PublicIdentityKey: req.PublicIdentityKey,
-		State:             StatePending,
-		ExpiresAt:         time.Now().Add(time.Duration(expiresIn) * time.Second),
-		CreatedAt:         time.Now(),
+		DeviceCode:          deviceCode,
+		UserCode:            userCode,
+		ClientID:            req.ClientID,
+		Platform:            req.Platform,
+		PublicIdentityKey:   req.PublicIdentityKey,
+		RequestedUserHandle: req.UserHandle,
+		State:               StatePending,
+		ExpiresAt:           time.Now().Add(time.Duration(expiresIn) * time.Second),
+		CreatedAt:           time.Now(),
 	}
 
 	d.byDeviceCode[deviceCode] = session
@@ -146,8 +182,23 @@ func (d *DeviceFlowManager) VerifyUserCode(userCode, userHandle string) error {
 	defer d.mu.Unlock()
 
 	normCode := strings.ToUpper(strings.TrimSpace(userCode))
+	now := time.Now()
+
+	// Reset failure tracker periodically
+	if now.Sub(d.lastFailedReset) > 60*time.Second {
+		d.failedAttempts = make(map[string]int)
+		d.lastFailedReset = now
+	}
+
+	// Rate-limit brute-force attempts on codes
+	if d.failedAttempts[normCode] >= 5 || d.failedAttempts["__global__"] >= 15 {
+		return ErrTooManyAttempts
+	}
+
 	session, exists := d.byUserCode[normCode]
 	if !exists {
+		d.failedAttempts[normCode]++
+		d.failedAttempts["__global__"]++
 		return ErrInvalidUserCode
 	}
 
@@ -165,7 +216,65 @@ func (d *DeviceFlowManager) VerifyUserCode(userCode, userHandle string) error {
 	session.UserHandle = userHandle
 	session.DeviceID = fmt.Sprintf("dev-%s-%s", session.Platform, generateRandomHex(6))
 
+	// Reset attempts on successful verification
+	delete(d.failedAttempts, normCode)
+
 	return nil
+}
+
+// GetPendingSessions returns all active device authorization sessions awaiting approval.
+func (d *DeviceFlowManager) GetPendingSessions() []*PendingDeviceSession {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	now := time.Now()
+	var pending []*PendingDeviceSession
+	for _, s := range d.byDeviceCode {
+		if s.State == StatePending && now.Before(s.ExpiresAt) {
+			pending = append(pending, s)
+		}
+	}
+	return pending
+}
+
+// AutoAuthorizeLatest finds the most recent pending session and approves it immediately.
+func (d *DeviceFlowManager) AutoAuthorizeLatest(userHandle string) (*PendingDeviceSession, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if userHandle == "" {
+		userHandle = "cli_user"
+	}
+	cleanTarget := strings.TrimPrefix(strings.ToLower(userHandle), "@")
+	cleanTarget = strings.TrimPrefix(cleanTarget, "student_")
+
+	now := time.Now()
+	var latest *PendingDeviceSession
+	for _, s := range d.byDeviceCode {
+		if s.State == StatePending && now.Before(s.ExpiresAt) {
+			// Defend against session hijack: only authorize if requested handle matches
+			if s.RequestedUserHandle != "" {
+				sReq := strings.TrimPrefix(strings.ToLower(s.RequestedUserHandle), "@")
+				sReq = strings.TrimPrefix(sReq, "student_")
+				if sReq != cleanTarget {
+					continue // Different requested user, do not auto-authorize!
+				}
+			}
+			if latest == nil || s.CreatedAt.After(latest.CreatedAt) {
+				latest = s
+			}
+		}
+	}
+
+	if latest == nil {
+		return nil, errors.New("no pending device authorization requests found for user")
+	}
+
+	latest.State = StateAuthorized
+	latest.UserHandle = userHandle
+	latest.DeviceID = fmt.Sprintf("dev-%s-%s", latest.Platform, generateRandomHex(6))
+
+	return latest, nil
 }
 
 func (d *DeviceFlowManager) cleanupSweeper(interval time.Duration) {

@@ -19,18 +19,25 @@ export function useWebSocket(token: string | null) {
   useEffect(() => {
     if (!token) return;
 
+    let isMounted = true;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     const wsUrl = `${protocol}//${host}/ws/v1/stream?token=${encodeURIComponent(token)}`;
 
     let ws: WebSocket;
     let heartbeatTimer: any;
+    let reconnectTimer: any;
 
     const connect = () => {
+      if (!isMounted) return;
       ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
+        if (!isMounted) {
+          ws.close();
+          return;
+        }
         setIsConnected(true);
         heartbeatTimer = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
@@ -40,6 +47,7 @@ export function useWebSocket(token: string | null) {
       };
 
       ws.onmessage = (event) => {
+        if (!isMounted) return;
         try {
           const frame = JSON.parse(event.data);
           if (frame.op === 'DELIVER_ENVELOPE' && frame.envelope) {
@@ -61,10 +69,13 @@ export function useWebSocket(token: string | null) {
       };
 
       ws.onclose = () => {
+        if (!isMounted) return;
         setIsConnected(false);
         clearInterval(heartbeatTimer);
-        // Reconnect after 3 seconds
-        setTimeout(connect, 3000);
+        // Reconnect after 3 seconds if still mounted
+        reconnectTimer = setTimeout(() => {
+          if (isMounted) connect();
+        }, 3000);
       };
 
       ws.onerror = () => {
@@ -75,7 +86,9 @@ export function useWebSocket(token: string | null) {
     connect();
 
     return () => {
+      isMounted = false;
       clearInterval(heartbeatTimer);
+      clearTimeout(reconnectTimer);
       if (wsRef.current) {
         wsRef.current.close();
       }

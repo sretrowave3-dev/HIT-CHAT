@@ -53,6 +53,7 @@ type DeviceCodeRequest struct {
 	ClientID          string `json:"client_id"`
 	Platform          string `json:"platform"` // "cli", "web", "desktop"
 	PublicIdentityKey string `json:"public_identity_key"`
+	UserHandle        string `json:"user_handle,omitempty"`
 }
 
 // DeviceCodeResponse provides authorization codes and instructions to the client.

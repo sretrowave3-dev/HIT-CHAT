@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -52,6 +53,13 @@ func initialModel(serverURL, userHandle, deviceID, token string) model {
 		msgs[c] = make([]ChatMessage, 0)
 	}
 
+	initialStatus := "Ready. Type message and press Enter. [Ctrl+A] Auto-Connect | [Ctrl+P] Privacy | [Esc] Quit"
+	if token == "" {
+		initialStatus = "Disconnected. Press [Ctrl+A] to Auto-Connect & Authorize | [Esc] Quit"
+	} else {
+		initialStatus = fmt.Sprintf("Connected as @%s. [Ctrl+A] Re-connect | [Ctrl+P] Privacy | [Esc] Quit", userHandle)
+	}
+
 	return model{
 		serverURL:       serverURL,
 		userHandle:      userHandle,
@@ -63,7 +71,7 @@ func initialModel(serverURL, userHandle, deviceID, token string) model {
 		selectedContact: 0,
 		messages:        msgs,
 		inputBuffer:     "",
-		statusMessage:   "Ready. Type message and press Enter. [Ctrl+P] Toggle Privacy | [Esc] Quit",
+		statusMessage:   initialStatus,
 		width:           80,
 		height:          24,
 	}
@@ -118,10 +126,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !strings.HasPrefix(sender, "@") {
 				sender = "@" + sender
 			}
+
+			// Decrypt incoming payload with pairwise key isolation, falling back cleanly
+			decrypted, dErr := crypto.DecryptPairwisePayload(msg.SenderID, m.userHandle, msg.IV, msg.Ciphertext, msg.AuthTag)
+			bodyText := ""
+			if dErr == nil {
+				bodyText = string(decrypted)
+			} else if utf8.Valid(msg.Ciphertext) {
+				bodyText = string(msg.Ciphertext)
+			} else {
+				bodyText = fmt.Sprintf("[Encrypted message: %d bytes]", len(msg.Ciphertext))
+			}
+
 			chatMsg := ChatMessage{
 				ID:        msg.ID,
 				Sender:    sender,
-				Text:      string(msg.Ciphertext), // Display ciphertext if not locally ratcheted
+				Text:      bodyText,
 				SentAt:    time.UnixMilli(msg.TimestampMS),
 				ExpiresAt: time.Now().Add(time.Duration(msg.TTLMilliseconds) * time.Millisecond),
 			}
@@ -169,19 +189,51 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMessage = fmt.Sprintf("Switched to conversation with %s", m.contacts[m.selectedContact])
 			return m, nil
 
+		case tea.KeyCtrlA:
+			t, d, h, err := EnsureAuthorized(m.serverURL, m.userHandle)
+			if err == nil {
+				m.token = t
+				m.deviceID = d
+				m.userHandle = h
+				m.statusMessage = fmt.Sprintf("Auto-authorized as @%s! Connecting to gateway...", h)
+				return m, m.connectWebSocket()
+			}
+			m.statusMessage = fmt.Sprintf("Auto-connect failed: %v", err)
+			return m, nil
+
 		case tea.KeyCtrlP:
 			m.locationEnabled = !m.locationEnabled
+			zoneCode := "PROTECTED"
+			bssidHash := ""
 			if m.locationEnabled {
 				bssid, ssid, err := geo.SniffCurrentBSSID()
 				if err == nil && bssid != "" {
 					m.currentZone = fmt.Sprintf("Wi-Fi [%s] (SSID: %s)", bssid[:8]+"...", ssid)
+					bssidHash = bssid
+					zoneCode = "WIFI_CAMPUS"
 				} else {
 					m.currentZone = "Engineering Hall - Robotics Lab 4"
+					zoneCode = "ENG_LAB_4"
 				}
 				m.statusMessage = "Location Broadcasting ENABLED: " + m.currentZone
 			} else {
 				m.currentZone = "Privacy Protected (Location Concealed)"
 				m.statusMessage = "Location Privacy ENABLED: Null vectors sent to peers"
+			}
+
+			// Broadcast presence update over WebSocket
+			if m.wsConn != nil {
+				presenceFrame := protocol.StreamFrame{
+					Op: protocol.OpUpdatePresence,
+					Presence: &protocol.PresencePayload{
+						UserHandle:      m.userHandle,
+						BSSIDHash:       bssidHash,
+						ZoneCode:        zoneCode,
+						LocationEnabled: m.locationEnabled,
+					},
+				}
+				data, _ := json.Marshal(presenceFrame)
+				_ = m.wsConn.WriteMessage(websocket.TextMessage, data)
 			}
 			return m, nil
 
@@ -215,13 +267,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.messages[target] = append(m.messages[target], chatMsg)
 
-				// If connected to server, send over WebSocket
+				// If connected to server, send encrypted over WebSocket
 				if m.wsConn != nil {
-					env := protocol.NewEnvelope(m.userHandle, strings.TrimPrefix(target, "@"), ttlMS)
-					env.Ciphertext = []byte(text)
-					env.EphemeralPublicKey = make([]byte, 32)
-					env.IV = make([]byte, 12)
-					env.AuthTag = make([]byte, 16)
+					cleanTarget := strings.TrimPrefix(target, "@")
+					env := protocol.NewEnvelope(m.userHandle, cleanTarget, ttlMS)
+					iv, cipher, tag, eErr := crypto.EncryptPairwisePayload(m.userHandle, cleanTarget, []byte(text))
+					if eErr == nil {
+						env.IV = iv
+						env.Ciphertext = cipher
+						env.AuthTag = tag
+					} else {
+						env.Ciphertext = []byte(text)
+					}
+					ephemKP, _ := crypto.GenerateKeyPair()
+					if ephemKP != nil {
+						env.EphemeralPublicKey = ephemKP.PublicKey
+					}
 					frame := protocol.StreamFrame{
 						Op:       protocol.OpSendEnvelope,
 						Envelope: env,
@@ -281,19 +342,23 @@ func (m model) View() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#374151"))
 
-	sidebarStyle := borderStyle.Width(24).Height(14)
-	chatStyle := borderStyle.Width(58).Height(14)
+	sidebarStyle := borderStyle.Width(20).Height(14)
+	chatStyle := borderStyle.Width(50).Height(14)
 
 	// Top Bar
 	locBadge := "[PRIVACY ON]"
 	if m.locationEnabled {
 		locBadge = "[LOCATION ON]"
 	}
+	connBadge := "[OFFLINE - Press Ctrl+A]"
+	if m.wsConn != nil {
+		connBadge = "[ONLINE]"
+	}
 	topBar := headerStyle.Render(fmt.Sprintf(
-		" CAMPUSNET SECURE TERMINAL | User: @%s | Device: %s ",
-		m.userHandle, m.deviceID,
+		" CAMPUSNET SECURE TERMINAL | User: @%-12s | %-10s ",
+		m.userHandle, connBadge,
 	))
-	zoneBar := fmt.Sprintf(" Zone: %-50s %s", m.currentZone, locBadge)
+	zoneBar := fmt.Sprintf(" Zone: %-45s %s", m.currentZone, locBadge)
 
 	// Contacts list
 	var contactsList []string
@@ -304,13 +369,13 @@ func (m model) View() string {
 			countTag = fmt.Sprintf(" (%d)", msgCount)
 		}
 		if i == m.selectedContact {
-			contactsList = append(contactsList, fmt.Sprintf("> %-16s%s", c, countTag))
+			contactsList = append(contactsList, fmt.Sprintf("> %-13s%s", c, countTag))
 		} else {
-			contactsList = append(contactsList, fmt.Sprintf("  %-16s%s", c, countTag))
+			contactsList = append(contactsList, fmt.Sprintf("  %-13s%s", c, countTag))
 		}
 	}
 	contactsPane := sidebarStyle.Render(
-		"CAMPUS CONTACTS\n───────────────\n" + strings.Join(contactsList, "\n"),
+		"CAMPUS PEERS\n────────────\n" + strings.Join(contactsList, "\n"),
 	)
 
 	// Chat Messages
@@ -318,8 +383,8 @@ func (m model) View() string {
 	if len(feed) == 0 {
 		msgLines = append(msgLines, "")
 		msgLines = append(msgLines, "  [No active messages]")
-		msgLines = append(msgLines, fmt.Sprintf("  Start an ephemeral encrypted chat with %s.", activeContact))
-		msgLines = append(msgLines, "  Messages burn automatically upon expiration.")
+		msgLines = append(msgLines, fmt.Sprintf("  Chatting with %s.", activeContact))
+		msgLines = append(msgLines, "  Messages burn upon expiration.")
 	} else {
 		for _, msg := range feed {
 			rem := msg.ExpiresAt.Sub(now).Seconds()
@@ -328,8 +393,8 @@ func (m model) View() string {
 			}
 			timerStr := fmt.Sprintf("[%.1fs]", rem)
 			line := fmt.Sprintf(" %s %s: %s", timerStr, msg.Sender, msg.Text)
-			if len(line) > 54 {
-				line = line[:51] + "..."
+			if len(line) > 46 {
+				line = line[:43] + "..."
 			}
 			msgLines = append(msgLines, line)
 		}
@@ -338,30 +403,36 @@ func (m model) View() string {
 		msgLines = append(msgLines, "")
 	}
 
+	start := 0
+	if len(msgLines) > 12 {
+		start = len(msgLines) - 12
+	}
+
 	chatPane := chatStyle.Render(
-		fmt.Sprintf("CONVERSATION: %s\n────────────────────────────────────────────────────────\n", activeContact) +
-			strings.Join(msgLines[:12], "\n"),
+		fmt.Sprintf("CONVERSATION: %s\n──────────────────────────────────────────────────\n", activeContact) +
+			strings.Join(msgLines[start:], "\n"),
 	)
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, contactsPane, chatPane)
 
 	// Status & Input
 	statusBar := fmt.Sprintf(" Status: %s", m.statusMessage)
-	inputBox := borderStyle.Width(84).Render(
+	inputBox := borderStyle.Width(74).Render(
 		fmt.Sprintf(" [%s] > %s█", activeContact, m.inputBuffer),
 	)
-	hotkeys := " [Tab] Switch Contact | [Enter] Send | [Ctrl+P] Toggle Location | [Ctrl+L] Shred | [Esc] Quit"
+	hotkeys := " [Tab] Switch | [Enter] Send | [Ctrl+A] Connect | [Ctrl+P] Loc | [Ctrl+L] Shred | [Esc] Quit"
 
 	return fmt.Sprintf("%s\n%s\n%s\n%s\n%s\n%s\n", topBar, zoneBar, body, statusBar, inputBox, hotkeys)
 }
 
 // RunTUI launches the interactive Bubble Tea terminal program.
-func RunTUI(serverURL, userHandle, deviceID string) error {
-	secStore, _ := crypto.NewSecureStore()
-	token := ""
-	if secStore != nil {
-		if t, err := secStore.Get("access_token"); err == nil {
-			token = string(t)
+func RunTUI(serverURL, userHandle, deviceID, token string) error {
+	if token == "" {
+		secStore, _ := crypto.NewSecureStore()
+		if secStore != nil {
+			if t, err := secStore.Get("access_token"); err == nil {
+				token = string(t)
+			}
 		}
 	}
 

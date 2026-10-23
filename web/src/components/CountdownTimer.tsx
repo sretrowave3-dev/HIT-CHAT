@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Flame } from 'lucide-react';
 
 interface CountdownTimerProps {
@@ -17,6 +17,9 @@ export const CountdownTimer: React.FC<CountdownTimerProps> = ({
     return Math.max(0, ttlMS - elapsed);
   });
 
+  const onExpireRef = useRef(onExpire);
+  onExpireRef.current = onExpire;
+
   useEffect(() => {
     const interval = setInterval(() => {
       const elapsed = Date.now() - timestampMS;
@@ -24,12 +27,12 @@ export const CountdownTimer: React.FC<CountdownTimerProps> = ({
       setRemaining(left);
       if (left <= 0) {
         clearInterval(interval);
-        onExpire();
+        onExpireRef.current();
       }
     }, 100);
 
     return () => clearInterval(interval);
-  }, [timestampMS, ttlMS, onExpire]);
+  }, [timestampMS, ttlMS]);
 
   const percentage = Math.max(0, Math.min(100, (remaining / ttlMS) * 100));
   const seconds = (remaining / 1000).toFixed(1);

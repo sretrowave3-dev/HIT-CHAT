@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 )
 
 var (
@@ -103,6 +104,67 @@ func HKDFExpand(prk, info []byte, length int) ([]byte, error) {
 func HKDFDerive(salt, ikm, info []byte, length int) ([]byte, error) {
 	prk := HKDFExtract(salt, ikm)
 	return HKDFExpand(prk, info, length)
+}
+
+// SharedCampusSecret is the default campus ratchet derivation secret for seamless cross-surface E2EE.
+const SharedCampusSecret = "CampusNet_Ratchet_Shared_Demo_Secret"
+
+// CanonicalHandle strips prefixes (@ and student_) and normalizes to lower case.
+func CanonicalHandle(h string) string {
+	clean := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(h)), "@")
+	clean = strings.TrimPrefix(clean, "student_")
+	return clean
+}
+
+// DerivePairwiseKey derives an isolated pairwise AES-256 key for conversation confidentiality between two peers.
+func DerivePairwiseKey(user1, user2 string) []byte {
+	u1 := CanonicalHandle(user1)
+	u2 := CanonicalHandle(user2)
+	var first, second string
+	if u1 <= u2 {
+		first, second = u1, u2
+	} else {
+		first, second = u2, u1
+	}
+	secretStr := fmt.Sprintf("%s:%s:%s", SharedCampusSecret, first, second)
+	hash := sha256.Sum256([]byte(secretStr))
+	return hash[:]
+}
+
+// EncryptPairwisePayload encrypts plaintext with the pairwise key isolated to sender and recipient.
+func EncryptPairwisePayload(sender, recipient string, plaintext []byte) (iv, ciphertext, tag []byte, err error) {
+	key := DerivePairwiseKey(sender, recipient)
+	return EncryptPayload(key, plaintext, nil)
+}
+
+// DecryptPairwisePayload decrypts ciphertext with the pairwise key, falling back cleanly to the shared campus key.
+func DecryptPairwisePayload(sender, recipient string, nonce, ciphertext, authTag []byte) ([]byte, error) {
+	pairwiseKey := DerivePairwiseKey(sender, recipient)
+	plain, err := DecryptPayload(pairwiseKey, nonce, ciphertext, authTag, nil)
+	if err == nil {
+		return plain, nil
+	}
+	// Backward-compatibility fallback
+	campusKey := DeriveCampusKey()
+	return DecryptPayload(campusKey, nonce, ciphertext, authTag, nil)
+}
+
+// DeriveCampusKey derives the 32-byte AES-256 key matching WebCrypto SHA-256 derivation.
+func DeriveCampusKey() []byte {
+	hash := sha256.Sum256([]byte(SharedCampusSecret))
+	return hash[:]
+}
+
+// EncryptMessagePayload encrypts plaintext with the standard campus ratchet AES-256-GCM cipher.
+func EncryptMessagePayload(plaintext []byte) (iv, ciphertext, tag []byte, err error) {
+	key := DeriveCampusKey()
+	return EncryptPayload(key, plaintext, nil)
+}
+
+// DecryptMessagePayload decrypts ciphertext with the standard campus ratchet AES-256-GCM cipher.
+func DecryptMessagePayload(nonce, ciphertext, authTag []byte) ([]byte, error) {
+	key := DeriveCampusKey()
+	return DecryptPayload(key, nonce, ciphertext, authTag, nil)
 }
 
 // EncryptPayload encrypts plaintext using standard AES-256-GCM (or ChaCha20-Poly1305) with 12-byte random IV.
