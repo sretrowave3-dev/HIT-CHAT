@@ -20,6 +20,7 @@ type KATFixtures struct {
 	PairwiseKDF         []PairwiseKDFFixture    `json:"pairwise_kdf"`
 	X3DH                X3DHFixture             `json:"x3dh"`
 	AEAD                AEADFixture             `json:"aead"`
+	TSAEAD              AEADFixture             `json:"ts_aead"`
 	RatchetKDFChain     []RatchetChainStep      `json:"ratchet_kdf_chain,omitempty"`
 	RatchetMessages     []RatchetMessageFixture `json:"ratchet_messages,omitempty"`
 	EnvelopeWire        EnvelopeWireFixture     `json:"envelope_wire"`
@@ -187,6 +188,16 @@ func TestGenerateKATFixtures(t *testing.T) {
 		AAD:           aad,
 		CiphertextB64: base64.StdEncoding.EncodeToString(cipherBytes),
 		AuthTagB64:    base64.StdEncoding.EncodeToString(tagBytes),
+	}
+
+	// 3b. TypeScript-generated AEAD (for cross-implementation TS-encrypt -> Go-decrypt verification)
+	fixtures.TSAEAD = AEADFixture{
+		KeyHex:        "6f5ff0716d0954a05f2630f8c50d0579110acaa25d3124ae494606f4dfd537cf",
+		IVBase64:      "AQIDBAUGBwgJCgsM",
+		Plaintext:     "Response from Web to CLI: Lab notebook received and verified.",
+		AAD:           "context_web_to_cli_v1",
+		CiphertextB64: "PEs3WhyI4uFLs8b79DChkcud3JoAlmSwT5ptWQj33S0ZDAwv9bQw29oQNC8zVCVc5FGdcdPETNeowGWO+w==",
+		AuthTagB64:    "wLa+1uc2dGshgGPVbs+PhA==",
 	}
 
 	// 4. X3DH Shared Secret

@@ -84,6 +84,7 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("/api/v1/crypto/bundle", r.handleBundleUpload)
 	r.mux.HandleFunc("/api/v1/crypto/bundle/", r.handleBundleFetch)
 	r.mux.HandleFunc("/api/v1/geo/resolve", r.handleGeoResolve)
+	r.mux.HandleFunc("/api/v1/metrics", r.handleMetrics)
 	r.registerDevAuthRoutes()
 	r.mux.HandleFunc("/", r.handleStaticOrSPA)
 }

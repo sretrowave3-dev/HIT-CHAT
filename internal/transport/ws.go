@@ -192,6 +192,7 @@ func (h *Hub) ServeWS(tokenMgr *auth.TokenManager, w http.ResponseWriter, r *htt
 	}
 
 	h.register <- client
+	GlobalMetrics.Reconnects.Add(1)
 
 	go client.writePump()
 	go client.readPump()
@@ -279,6 +280,7 @@ func (c *Client) handleFrame(frame *protocol.StreamFrame) {
 
 		// Check if recipient is connected
 		delivered := c.hub.routeEnvelope(frame.Envelope)
+		GlobalMetrics.Sent.Add(1)
 
 		// Send ACK back to sender
 		ackFrame := &protocol.StreamFrame{
@@ -290,6 +292,7 @@ func (c *Client) handleFrame(frame *protocol.StreamFrame) {
 
 	case protocol.OpAckDelivered:
 		if frame.AckMessageID != "" {
+			GlobalMetrics.Delivered.Add(1)
 			env, _ := c.hub.ephemeralMgr.RetrieveEnvelope(ctx, frame.AckMessageID)
 			if env != nil && env.SenderID != "" && env.SenderID != c.userHandle {
 				c.hub.routeFrameToTarget(env.SenderID, &protocol.StreamFrame{
@@ -318,6 +321,10 @@ func (c *Client) handleFrame(frame *protocol.StreamFrame) {
 
 	case protocol.OpNack:
 		if frame.AckMessageID != "" {
+			GlobalMetrics.Nacks.Add(1)
+			if strings.Contains(strings.ToUpper(frame.NackReason), "DECRYPT") {
+				GlobalMetrics.DecryptFailures.Add(1)
+			}
 			log.Printf("[WS] Decrypt NACK from %s for %s: %s", c.userHandle, frame.AckMessageID, frame.NackReason)
 			env, _ := c.hub.ephemeralMgr.RetrieveEnvelope(ctx, frame.AckMessageID)
 			if env != nil && env.SenderID != "" && env.SenderID != c.userHandle {

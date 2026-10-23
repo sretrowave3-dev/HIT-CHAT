@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -22,6 +23,8 @@ var (
 // Ciphertext, EphemeralPublicKey, IV, and AuthTag are opaque to the server.
 type Envelope struct {
 	ID                 string `json:"id"`
+	ConversationID     string `json:"conversation_id,omitempty"`
+	Seq                uint64 `json:"seq,omitempty"`
 	RecipientID        string `json:"recipient_id"`
 	SenderID           string `json:"sender_id"`
 	EphemeralPublicKey []byte `json:"ephemeral_public_key"` // 32 bytes X25519
@@ -34,11 +37,39 @@ type Envelope struct {
 	TimestampMS        int64  `json:"timestamp_ms"`          // Sent timestamp in UTC epoch ms
 }
 
-// NewEnvelope initializes an envelope with a random UUID and current timestamp.
+// DeriveConversationID computes canonical conversation identifier between two parties.
+func DeriveConversationID(user1, user2 string) string {
+	u1 := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(user1)), "@")
+	u2 := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(user2)), "@")
+	if strings.HasPrefix(u2, "group_") || strings.HasPrefix(u2, "study_") || strings.HasPrefix(u2, "robotics_") {
+		return "group:" + u2
+	}
+	if u1 <= u2 {
+		return fmt.Sprintf("conv:%s:%s", u1, u2)
+	}
+	return fmt.Sprintf("conv:%s:%s", u2, u1)
+}
+
+// NewUUIDv7 generates an RFC 9562 UUIDv7 with millisecond timestamp ordering.
+func NewUUIDv7() string {
+	var uuid [16]byte
+	now := time.Now().UTC().UnixMilli()
+	uuid[0] = byte(now >> 40)
+	uuid[1] = byte(now >> 32)
+	uuid[2] = byte(now >> 24)
+	uuid[3] = byte(now >> 16)
+	uuid[4] = byte(now >> 8)
+	uuid[5] = byte(now)
+	_, _ = rand.Read(uuid[6:])
+	uuid[6] = (uuid[6] & 0x0f) | 0x70 // Version 7
+	uuid[8] = (uuid[8] & 0x3f) | 0x80 // Variant RFC 4122 / 9562
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:16])
+}
+
+// NewEnvelope initializes an envelope with a UUIDv7 and current timestamp.
 func NewEnvelope(senderID, recipientID string, ttlMS int64) *Envelope {
-	uuidBytes := make([]byte, 16)
-	_, _ = rand.Read(uuidBytes)
-	uuidStr := fmt.Sprintf("%x-%x-%x-%x-%x", uuidBytes[0:4], uuidBytes[4:6], uuidBytes[6:8], uuidBytes[8:10], uuidBytes[10:16])
+	uuidStr := NewUUIDv7()
 
 	if ttlMS <= 0 {
 		ttlMS = 10000 // Default 10 second ephemerality
@@ -46,6 +77,7 @@ func NewEnvelope(senderID, recipientID string, ttlMS int64) *Envelope {
 
 	return &Envelope{
 		ID:              uuidStr,
+		ConversationID:  DeriveConversationID(senderID, recipientID),
 		SenderID:        senderID,
 		RecipientID:     recipientID,
 		TTLMilliseconds: ttlMS,

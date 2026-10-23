@@ -48,6 +48,17 @@ describe('Known-Answer Tests (Cross-Implementation Go & WebCrypto)', () => {
     expect(uint8ArrayToBase64(authTag)).toBe(fixtures.aead.auth_tag_b64);
   });
 
+  it('Round-Trip: TS encrypts and Go decrypts matches ts_aead fixture', async () => {
+    const keyBytes = hexToBytes(fixtures.ts_aead.key_hex);
+    const iv = base64ToUint8Array(fixtures.ts_aead.iv_b64);
+    const plaintext = new TextEncoder().encode(fixtures.ts_aead.plaintext);
+    const aad = new TextEncoder().encode(fixtures.ts_aead.aad);
+
+    const { ciphertext, authTag } = await WebRatchet.encryptPayload(keyBytes, iv, plaintext, aad);
+    expect(uint8ArrayToBase64(ciphertext)).toBe(fixtures.ts_aead.ciphertext_b64);
+    expect(uint8ArrayToBase64(authTag)).toBe(fixtures.ts_aead.auth_tag_b64);
+  });
+
   it('Envelope JSON Wire Deserialization matches Go protocol wire format', () => {
     const parsed = JSON.parse(fixtures.envelope_wire.wire_json);
     expect(parsed.id).toBe(fixtures.envelope_wire.envelope.id);

@@ -38,6 +38,41 @@ func main() {
 
 	subcommand := os.Args[1]
 	switch subcommand {
+	case "whoami":
+		secStore, err := crypto.NewSecureStore()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] Opening secure store: %v\n", err)
+			os.Exit(1)
+		}
+		handle, _ := secStore.Get("user_handle")
+		deviceID, _ := secStore.Get("device_id")
+		asUser := os.Getenv("CAMPUSNET_AS")
+
+		activeHandle := string(handle)
+		if activeHandle == "" {
+			if asUser != "" {
+				activeHandle = asUser
+			} else {
+				activeHandle = "campus_dev (unregistered)"
+			}
+		}
+
+		fmt.Println("==================================================================")
+		fmt.Println("             CAMPUSNET CLIENT IDENTITY INSPECTOR                  ")
+		fmt.Println("==================================================================")
+		fmt.Printf(" Active User Handle:  @%s\n", strings.TrimPrefix(activeHandle, "@"))
+		if len(deviceID) > 0 {
+			fmt.Printf(" Active Device ID:    %s\n", string(deviceID))
+		} else {
+			fmt.Println(" Active Device ID:    (ephemeral dev session)")
+		}
+		if asUser != "" {
+			fmt.Printf(" Scoped Via:          --as %s\n", asUser)
+		}
+		fmt.Println(" Cryptographic Trust: Zero-Knowledge Pairwise HKDF / Double Ratchet")
+		fmt.Println("==================================================================")
+		return
+
 	case "pair":
 		pairCmd := flag.NewFlagSet("pair", flag.ExitOnError)
 		srv := pairCmd.String("server", serverURL, "Server gateway URL")

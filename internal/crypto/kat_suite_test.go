@@ -92,6 +92,22 @@ func TestKAT_AEADEncryptDecrypt(t *testing.T) {
 	}
 }
 
+func TestKAT_TSEncrypt_GoDecrypt(t *testing.T) {
+	f := loadKATFixtures(t)
+	key, _ := hex.DecodeString(f.TSAEAD.KeyHex)
+	iv, _ := base64.StdEncoding.DecodeString(f.TSAEAD.IVBase64)
+	expectedCipher, _ := base64.StdEncoding.DecodeString(f.TSAEAD.CiphertextB64)
+	expectedTag, _ := base64.StdEncoding.DecodeString(f.TSAEAD.AuthTagB64)
+
+	decrypted, err := DecryptPayload(key, iv, expectedCipher, expectedTag, []byte(f.TSAEAD.AAD))
+	if err != nil {
+		t.Fatalf("Go failed to decrypt TypeScript-produced ciphertext: %v", err)
+	}
+	if string(decrypted) != f.TSAEAD.Plaintext {
+		t.Fatalf("Decrypted plaintext mismatch: expected %q, got %q", f.TSAEAD.Plaintext, string(decrypted))
+	}
+}
+
 func TestKAT_X3DHSharedSecret(t *testing.T) {
 	f := loadKATFixtures(t)
 	x := f.X3DH

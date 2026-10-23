@@ -103,6 +103,14 @@
     "ciphertext_b64": "ssPSlEfUM0HpCTNIhwML6I9fVPdPliUiBsQpIfBjMHti+MVm4f/EMi8Hc230YrudVRVPbg==",
     "auth_tag_b64": "i5mPEtPyOyMezIML+mLadw=="
   },
+  "ts_aead": {
+    "key_hex": "6f5ff0716d0954a05f2630f8c50d0579110acaa25d3124ae494606f4dfd537cf",
+    "iv_b64": "AQIDBAUGBwgJCgsM",
+    "plaintext": "Response from Web to CLI: Lab notebook received and verified.",
+    "aad": "context_web_to_cli_v1",
+    "ciphertext_b64": "PEs3WhyI4uFLs8b79DChkcud3JoAlmSwT5ptWQj33S0ZDAwv9bQw29oQNC8zVCVc5FGdcdPETNeowGWO+w==",
+    "auth_tag_b64": "wLa+1uc2dGshgGPVbs+PhA=="
+  },
   "ratchet_kdf_chain": [
     {
       "step": 0,
@@ -138,6 +146,7 @@
   "envelope_wire": {
     "envelope": {
       "id": "11111111-2222-3333-4444-555555555555",
+      "conversation_id": "conv:alice:bob",
       "recipient_id": "bob",
       "sender_id": "alice",
       "ratchet_seq": 0,
@@ -149,6 +158,6 @@
       "ciphertext": "ZW5jcnlwdGVkX3Rlc3RfcGF5bG9hZF9ieXRlc18zMmI=",
       "auth_tag": "EA8ODQwLCgkIBwYFBAMCAQ=="
     },
-    "wire_json": "{\"id\":\"11111111-2222-3333-4444-555555555555\",\"recipient_id\":\"bob\",\"sender_id\":\"alice\",\"ratchet_seq\":0,\"chain_seq\":0,\"ttl_ms\":10000,\"timestamp_ms\":1729680000000,\"ephemeral_public_key\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=\",\"iv\":\"AQIDBAUGBwgJCgsM\",\"ciphertext\":\"ZW5jcnlwdGVkX3Rlc3RfcGF5bG9hZF9ieXRlc18zMmI=\",\"auth_tag\":\"EA8ODQwLCgkIBwYFBAMCAQ==\"}"
+    "wire_json": "{\"id\":\"11111111-2222-3333-4444-555555555555\",\"conversation_id\":\"conv:alice:bob\",\"recipient_id\":\"bob\",\"sender_id\":\"alice\",\"ratchet_seq\":0,\"chain_seq\":0,\"ttl_ms\":10000,\"timestamp_ms\":1729680000000,\"ephemeral_public_key\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=\",\"iv\":\"AQIDBAUGBwgJCgsM\",\"ciphertext\":\"ZW5jcnlwdGVkX3Rlc3RfcGF5bG9hZF9ieXRlc18zMmI=\",\"auth_tag\":\"EA8ODQwLCgkIBwYFBAMCAQ==\"}"
   }
 }

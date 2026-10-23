@@ -5,6 +5,8 @@
 
 export interface WebEnvelope {
   id: string;
+  conversation_id?: string;
+  seq?: number;
   recipient_id: string;
   sender_id: string;
   ephemeral_public_key: string;
@@ -15,6 +17,38 @@ export interface WebEnvelope {
   auth_tag: string; // Base64
   ttl_ms: number;
   timestamp_ms: number;
+}
+
+export function generateUUIDv7(): string {
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes);
+  } else if (typeof globalThis !== 'undefined' && (globalThis as any).crypto?.getRandomValues) {
+    (globalThis as any).crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  const now = Date.now();
+  bytes[0] = (now >> 40) & 0xff;
+  bytes[1] = (now >> 32) & 0xff;
+  bytes[2] = (now >> 24) & 0xff;
+  bytes[3] = (now >> 16) & 0xff;
+  bytes[4] = (now >> 8) & 0xff;
+  bytes[5] = now & 0xff;
+  bytes[6] = (bytes[6] & 0x0f) | 0x70; // Version 7
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // Variant
+  return Array.from(bytes)
+    .map((b, i) => ([4, 6, 8, 10].includes(i) ? '-' : '') + b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+export function deriveConversationId(user1: string, user2: string): string {
+  const u1 = canonicalHandle(user1);
+  const u2 = canonicalHandle(user2);
+  if (u2.startsWith('group_') || u2.startsWith('study_') || u2.startsWith('robotics_')) {
+    return `group:${u2}`;
+  }
+  return u1 <= u2 ? `conv:${u1}:${u2}` : `conv:${u2}:${u1}`;
 }
 
 export function getCrypto(): Crypto {
@@ -237,10 +271,12 @@ export class WebRatchet {
 
     const { ciphertext, authTag } = await this.encryptPayload(keyBytes, iv, data);
 
-    const uuid = getCrypto().randomUUID ? getCrypto().randomUUID() : 'msg-' + Math.random().toString(36).substring(2, 15);
+    const uuid = generateUUIDv7();
+    const convId = deriveConversationId(sender, recipient);
 
     return {
       id: uuid,
+      conversation_id: convId,
       sender_id: sender,
       recipient_id: recipient,
       ephemeral_public_key: uint8ArrayToBase64(ephemeralKey),
