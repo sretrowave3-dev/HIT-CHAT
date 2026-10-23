@@ -4,7 +4,8 @@
  * and persisted exclusively within browser IndexedDB hardware/software isolation.
  */
 
-const DB_NAME = 'CampusNet_Security_Vault';
+import { canonicalHandle } from './ratchet.ts';
+
 const DB_VERSION = 1;
 const STORE_NAME = 'crypto_keys';
 
@@ -17,10 +18,17 @@ export interface StoredKeyPair {
 
 export class WebKeyStore {
   private dbPromise: Promise<IDBDatabase>;
+  private dbName: string;
 
-  constructor() {
+  constructor(userHandle: string = 'default') {
+    const clean = canonicalHandle(userHandle) || 'default';
+    this.dbName = `CampusNet_Security_Vault_${clean}`;
     this.dbPromise = new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      if (typeof indexedDB === 'undefined') {
+        reject(new Error('IndexedDB not supported in this environment'));
+        return;
+      }
+      const req = indexedDB.open(this.dbName, DB_VERSION);
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains(STORE_NAME)) {

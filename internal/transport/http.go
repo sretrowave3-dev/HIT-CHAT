@@ -36,12 +36,17 @@ func limitRequestBody(w http.ResponseWriter, req *http.Request) {
 
 // Router sets up HTTP REST endpoints.
 type Router struct {
-	mux           *http.ServeMux
-	deviceFlow    *auth.DeviceFlowManager
-	bundleReg     *auth.BundleRegistry
-	tokenMgr      *auth.TokenManager
-	geoResolver   *geo.BSSIDResolver
-	privacyFilter *geo.ZeroBypassPrivacyFilter
+	mux            *http.ServeMux
+	deviceFlow     *auth.DeviceFlowManager
+	bundleReg      *auth.BundleRegistry
+	tokenMgr       *auth.TokenManager
+	geoResolver    *geo.BSSIDResolver
+	privacyFilter  *geo.ZeroBypassPrivacyFilter
+	devAuthEnabled bool
+}
+
+func (r *Router) SetDevAuthEnabled(enabled bool) {
+	r.devAuthEnabled = enabled
 }
 
 func NewRouter(
@@ -79,6 +84,7 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("/api/v1/crypto/bundle", r.handleBundleUpload)
 	r.mux.HandleFunc("/api/v1/crypto/bundle/", r.handleBundleFetch)
 	r.mux.HandleFunc("/api/v1/geo/resolve", r.handleGeoResolve)
+	r.registerDevAuthRoutes()
 	r.mux.HandleFunc("/", r.handleStaticOrSPA)
 }
 
@@ -140,7 +146,7 @@ func (r *Router) handleStaticOrSPA(w http.ResponseWriter, req *http.Request) {
 <html>
 <head><title>CampusNet Ephemeral Gateway</title></head>
 <body style="font-family:system-ui,sans-serif;background:#0d1117;color:#c9d1d9;padding:40px;text-align:center;">
-  <h1 style="color:#10b981;">⚡ CampusNet Gateway Server v1.0.0</h1>
+  <h1 style="color:#10b981;">âš¡ CampusNet Gateway Server v1.0.0</h1>
   <p>Zero-Knowledge Ephemeral Communications Relay is ACTIVE.</p>
   <p>API Health: <a style="color:#38bdf8;" href="/api/v1/health">/api/v1/health</a></p>
   <p>To serve the full React web portal here, run: <code>npm --prefix web run build</code></p>

@@ -29,6 +29,9 @@ type SecureStore struct {
 
 // NewSecureStore initializes secure local storage.
 func NewSecureStore() (*SecureStore, error) {
+	if asUser := os.Getenv("CAMPUSNET_AS"); asUser != "" {
+		return NewSecureStoreForUser(asUser)
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."
@@ -36,6 +39,27 @@ func NewSecureStore() (*SecureStore, error) {
 	appDir := filepath.Join(home, ".campusnet")
 	if err := os.MkdirAll(appDir, 0700); err != nil {
 		return nil, fmt.Errorf("creating secure config dir: %w", err)
+	}
+
+	return &SecureStore{
+		memoryMap: make(map[string][]byte),
+		storePath: filepath.Join(appDir, "secrets.enc"),
+	}, nil
+}
+
+// NewSecureStoreForUser initializes secure local storage scoped to a specific user handle.
+func NewSecureStoreForUser(userHandle string) (*SecureStore, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	clean := CanonicalHandle(userHandle)
+	if clean == "" {
+		clean = "default"
+	}
+	appDir := filepath.Join(home, ".campusnet", "users", clean)
+	if err := os.MkdirAll(appDir, 0700); err != nil {
+		return nil, fmt.Errorf("creating user secure config dir: %w", err)
 	}
 
 	return &SecureStore{

@@ -20,10 +20,21 @@ import (
 )
 
 func main() {
+	host := flag.String("host", "127.0.0.1", "Host address to bind to (e.g. 127.0.0.1 or 0.0.0.0)")
 	port := flag.Int("port", 8080, "HTTP and WebSocket server port")
+	lan := flag.Bool("lan", false, "Enable LAN access (binds 0.0.0.0, enables local HTTPS and discovers LAN IPs)")
+	enableTLS := flag.Bool("tls", false, "Enforce local HTTPS/WSS with auto-generated local dev CA")
+	devAuth := flag.Bool("dev-auth", false, "Enable development identity switcher endpoint (restricted to private network)")
 	redisAddr := flag.String("redis", "", "Redis address (e.g. localhost:6379). Defaults to in-memory store if unset")
 	jwtSecret := flag.String("secret", "campusnet-dev-session-secret-change-in-production-2026", "JWT session signing secret")
 	flag.Parse()
+
+	bindHost := *host
+	if *lan && bindHost == "127.0.0.1" {
+		bindHost = "0.0.0.0"
+	}
+
+	useTLS := *enableTLS || *lan
 
 	effectiveJWTSecret := *jwtSecret
 	if envSecret := os.Getenv("JWT_SECRET"); envSecret != "" {
@@ -85,6 +96,21 @@ func main() {
 	go hub.Run()
 
 	router := transport.NewRouter(deviceFlowMgr, bundleRegistry, tokenMgr, geoResolver, privacyFilter)
+	router.SetDevAuthEnabled(*devAuth)
+
+	// Discover LAN IPs
+	lanIPs, err := transport.GetLocalIPv4Addresses()
+	if err != nil {
+		log.Printf("[WARN] Failed to discover local IPv4 addresses: %v", err)
+	}
+
+	var certFile, keyFile, caPath string
+	if useTLS {
+		certFile, keyFile, caPath, err = transport.EnsureDevCertificates(".campusnet-tls", lanIPs)
+		if err != nil {
+			log.Fatalf("[FATAL] Generating local TLS certificates failed: %v", err)
+		}
+	}
 
 	// 4. Register WebSocket stream handler and REST/SPA router
 	mainMux := http.NewServeMux()
@@ -93,7 +119,7 @@ func main() {
 	})
 	mainMux.Handle("/", router.Handler())
 
-	serverAddr := fmt.Sprintf(":%d", *port)
+	serverAddr := fmt.Sprintf("%s:%d", bindHost, *port)
 	srv := &http.Server{
 		Addr:           serverAddr,
 		Handler:        transport.CORSMiddleware(mainMux),
@@ -105,10 +131,15 @@ func main() {
 
 	// 5. Start Server in Goroutine
 	go func() {
-		log.Printf("[READY] Gateway listening on http://0.0.0.0%s", serverAddr)
-		log.Printf("[READY] WebSocket stream available at ws://0.0.0.0%s/ws/v1/stream", serverAddr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("[FATAL] Server listen failed: %v", err)
+		transport.PrintLANBanner(bindHost, *port, lanIPs, useTLS, caPath)
+		if useTLS {
+			if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("[FATAL] HTTPS Server listen failed: %v", err)
+			}
+		} else {
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("[FATAL] Server listen failed: %v", err)
+			}
 		}
 	}()
 

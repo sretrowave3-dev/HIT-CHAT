@@ -4,6 +4,7 @@ import { ChatFeed, DisplayMessage } from './components/ChatFeed.tsx';
 import { DevicePairing } from './components/DevicePairing.tsx';
 import { PrivacyInfoModal } from './components/PresenceBadge.tsx';
 import { DiagnosticsModal } from './components/DiagnosticsModal.tsx';
+import { DevIdentityPicker } from './components/DevIdentityPicker.tsx';
 import { WebKeyStore } from './crypto/keys.ts';
 import { WebRatchet, WebEnvelope, canonicalHandle } from './crypto/ratchet.ts';
 import { useWebSocket } from './hooks/useWebSocket.ts';
@@ -17,7 +18,7 @@ import {
 } from './components/PosterMotifs.tsx';
 
 export const App: React.FC = () => {
-  const [currentUser] = useState('alice');
+  const [currentUser, setCurrentUser] = useState('alice');
   const [contacts, setContacts] = useState<string[]>([
     '@student_guest',
     '@bob',
@@ -37,7 +38,14 @@ export const App: React.FC = () => {
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const [isShutterActive, setIsShutterActive] = useState(false);
 
-  const keyStore = useMemo(() => new WebKeyStore(), []);
+  const keyStore = useMemo(() => new WebKeyStore(currentUser), [currentUser]);
+
+  const handleSwitchIdentity = useCallback((handle: string, newToken: string) => {
+    setCurrentUser(handle);
+    setToken(newToken);
+    setMessages([]);
+    seenEnvelopeIds.current = new Set();
+  }, []);
 
   // Initialize authenticated session and register PreKeyBundle on backend
   useEffect(() => {
@@ -461,6 +469,12 @@ export const App: React.FC = () => {
             </motion.button>
           </div>
         </header>
+
+        {/* Dev-Only Identity Switcher (Rendered in DEV or when VITE_DEV_AUTH is true) */}
+        <DevIdentityPicker
+          currentHandle={currentUser}
+          onSwitchIdentity={handleSwitchIdentity}
+        />
 
         {/* Messaging Layout */}
         <div className="flex-1 grid grid-cols-1 md:grid-cols-4 gap-4 overflow-hidden min-h-[560px]">

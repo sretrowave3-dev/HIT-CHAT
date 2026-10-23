@@ -10,6 +10,21 @@ import (
 )
 
 func main() {
+	// Parse global --as flag for dev identity scoping
+	var filteredArgs []string
+	for i := 0; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		if arg == "--as" && i+1 < len(os.Args) {
+			_ = os.Setenv("CAMPUSNET_AS", os.Args[i+1])
+			i++
+		} else if strings.HasPrefix(arg, "--as=") {
+			_ = os.Setenv("CAMPUSNET_AS", strings.TrimPrefix(arg, "--as="))
+		} else {
+			filteredArgs = append(filteredArgs, arg)
+		}
+	}
+	os.Args = filteredArgs
+
 	serverURL := "http://localhost:8080"
 	if envURL := os.Getenv("CAMPUSNET_SERVER"); envURL != "" {
 		serverURL = envURL
