@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -16,11 +18,38 @@ import (
 	"github.com/hit-chat/campusnet/pkg/protocol"
 )
 
+// isOriginAllowed validates whether an incoming request Origin is trusted.
+// CSWSH DEFENSE: Rejects malicious cross-site origins while permitting localhost,
+// same-host, Tauri desktop (tauri://localhost), and native CLI (no Origin header).
+func isOriginAllowed(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		// Native clients (CLI terminal, curl) do not set Origin header
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" || strings.EqualFold(u.Host, r.Host) || u.Scheme == "tauri" {
+		return true
+	}
+	if custom := os.Getenv("ALLOWED_ORIGINS"); custom != "" {
+		for _, allowed := range strings.Split(custom, ",") {
+			if strings.EqualFold(strings.TrimSpace(allowed), origin) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all client surfaces (Web SPA, Tauri Desktop, CLI)
+		return isOriginAllowed(r)
 	},
 }
 

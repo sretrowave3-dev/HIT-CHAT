@@ -43,12 +43,23 @@ func AuthMiddleware(tokenMgr *auth.TokenManager, next http.HandlerFunc) http.Han
 	}
 }
 
-// CORSMiddleware enables cross-origin requests for web clients.
+// CORSMiddleware enables cross-origin requests for verified clients and attaches strict security headers.
 func CORSMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+		// Security Headers (Clickjacking, MIME-sniffing, CSP)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; font-src 'self'; img-src 'self' data:; frame-ancestors 'none';")
+
+		origin := r.Header.Get("Origin")
+		if origin != "" && isOriginAllowed(r) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Vary", "Origin")
+		}
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
