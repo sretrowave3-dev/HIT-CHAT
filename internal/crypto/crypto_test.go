@@ -5,6 +5,8 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"testing"
+
+	"github.com/hit-chat/campusnet/pkg/protocol"
 )
 
 func TestKeyPairGenerationAndECDH(t *testing.T) {
@@ -271,5 +273,70 @@ func TestPairwiseIsolationAndDowngradeRejection(t *testing.T) {
 	_, err = DecryptPairwisePayload("alice", "bob", ivDemo, cipherDemo, tagDemo)
 	if err == nil {
 		t.Fatalf("security vulnerability: DecryptPairwisePayload accepted forged message encrypted with campus demo key!")
+	}
+}
+
+
+func TestDoubleRatchetStateRollbackOnFailedDecrypt(t *testing.T) {
+	sharedKey := make([]byte, 32)
+	copy(sharedKey, []byte("state_rollback_test_master_key!!"))
+
+	bobDH, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	aliceRatchet, err := NewDoubleRatchetInitiator(sharedKey, bobDH.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobRatchet := NewDoubleRatchetReceiver(sharedKey, bobDH)
+
+	// Step 1: Alice sends initial message to initialize Bob's receiving chain
+	m1 := []byte("Initial message 1")
+	env1, err := aliceRatchet.Encrypt("alice", "bob", m1, 10000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec1, err := bobRatchet.Decrypt(env1)
+	if err != nil || !bytes.Equal(m1, dec1) {
+		t.Fatalf("initial message decrypt failed: %v", err)
+	}
+
+	// Step 2: Attacker injects a forged packet with a new ephemeral public key and invalid ciphertext/tag
+	attackerDH, _ := GenerateKeyPair()
+	forgedEnv := &protocol.Envelope{
+		ID:                 "forged-msg-123",
+		SenderID:           "alice",
+		RecipientID:        "bob",
+		TimestampMS:        env1.TimestampMS + 1000,
+		TTLMilliseconds:    10000,
+		EphemeralPublicKey: attackerDH.PublicKey, // New unexpected ephemeral key
+		RatchetSeq:         1,
+		ChainSeq:           0,
+		IV:                 make([]byte, 12),
+		Ciphertext:         []byte("forged_corrupted_ciphertext_data"),
+		AuthTag:            make([]byte, 16),
+	}
+
+	_, err = bobRatchet.Decrypt(forgedEnv)
+	if err == nil {
+		t.Fatalf("expected decryption error on forged packet, got nil")
+	}
+
+	// Step 3: Alice sends a legitimate follow-up message
+	m2 := []byte("Legitimate Alice Message After Attack")
+	env2, err := aliceRatchet.Encrypt("alice", "bob", m2, 10000)
+	if err != nil {
+		t.Fatalf("alice encrypt failed: %v", err)
+	}
+
+	// Bob MUST still be able to decrypt Alice's legitimate message without state desynchronization
+	dec2, err := bobRatchet.Decrypt(env2)
+	if err != nil {
+		t.Fatalf("CRITICAL STATE DESYNCHRONIZATION: Bob failed to decrypt Alice's legitimate message after attack: %v", err)
+	}
+	if !bytes.Equal(m2, dec2) {
+		t.Fatalf("decrypted message mismatch: got %s, want %s", dec2, m2)
 	}
 }

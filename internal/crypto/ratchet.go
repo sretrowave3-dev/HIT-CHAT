@@ -143,48 +143,125 @@ func (r *DoubleRatchet) Decrypt(env *protocol.Envelope) ([]byte, error) {
 	// 1. Check if key is already in skipped keys buffer (out-of-order resolution)
 	skipKeyID := fmt.Sprintf("%d:%d", env.RatchetSeq, env.ChainSeq)
 	if sk, ok := r.SkippedKeys[skipKeyID]; ok {
+		plaintext, err := DecryptPayload(sk.Key, env.IV, env.Ciphertext, env.AuthTag, []byte(assocData))
+		if err != nil {
+			return nil, fmt.Errorf("decryption failed: %w", err)
+		}
 		delete(r.SkippedKeys, skipKeyID)
 		defer ZeroBytes(sk.Key)
-		return DecryptPayload(sk.Key, env.IV, env.Ciphertext, env.AuthTag, []byte(assocData))
+		return plaintext, nil
 	}
+
+	// Transactional snapshot before ratchet advancement to prevent desynchronization on failed decrypt
+	snap := r.snapshot()
 
 	// 2. If new remote DH public key arrived, advance DH ratchet
 	if r.DHRecvRemote == nil || !bytes.Equal(env.EphemeralPublicKey, r.DHRecvRemote) {
 		// Save any skipped keys from remaining messages in current receiving chain
 		if err := r.skipMessageKeys(env.RatchetSeq); err != nil {
+			r.rollback(snap)
 			return nil, err
 		}
 		if err := r.dhRatchetStep(env.EphemeralPublicKey); err != nil {
+			r.rollback(snap)
 			return nil, err
 		}
 	}
 
 	// 3. Save any skipped keys in current receiving chain up to env.ChainSeq
 	if err := r.skipMessageKeys(env.ChainSeq); err != nil {
+		r.rollback(snap)
 		return nil, err
 	}
 
 	// 4. Derive message key for this sequence
 	nextCK, messageKey, err := kdfChain(r.RecvChainKey)
 	if err != nil {
+		r.rollback(snap)
 		return nil, fmt.Errorf("advancing recv chain: %w", err)
 	}
-	r.RecvChainKey = nextCK
-	r.Nr++
 	defer ZeroBytes(messageKey)
 
 	// 5. Decrypt and verify payload
 	plaintext, err := DecryptPayload(messageKey, env.IV, env.Ciphertext, env.AuthTag, []byte(assocData))
 	if err != nil {
+		r.rollback(snap)
 		return nil, fmt.Errorf("decryption failed: %w", err)
 	}
 
+	// Decryption succeeded: commit advanced receive chain key and counter
+	r.RecvChainKey = nextCK
+	r.Nr++
+
 	return plaintext, nil
+}
+
+type ratchetSnapshot struct {
+	dhSendLocal  *KeyPair
+	dhRecvRemote []byte
+	rootKey      []byte
+	sendChainKey []byte
+	recvChainKey []byte
+	ns           uint32
+	nr           uint32
+	pn           uint32
+	skippedKeys  map[string]SkippedKey
+}
+
+func (r *DoubleRatchet) snapshot() *ratchetSnapshot {
+	s := &ratchetSnapshot{
+		dhSendLocal:  r.DHSendLocal,
+		dhRecvRemote: cloneBytes(r.DHRecvRemote),
+		rootKey:      cloneBytes(r.RootKey),
+		sendChainKey: cloneBytes(r.SendChainKey),
+		recvChainKey: cloneBytes(r.RecvChainKey),
+		ns:           r.Ns,
+		nr:           r.Nr,
+		pn:           r.Pn,
+		skippedKeys:  make(map[string]SkippedKey, len(r.SkippedKeys)),
+	}
+	for k, v := range r.SkippedKeys {
+		s.skippedKeys[k] = SkippedKey{
+			Key:       cloneBytes(v.Key),
+			CreatedAt: v.CreatedAt,
+		}
+	}
+	return s
+}
+
+func (r *DoubleRatchet) rollback(s *ratchetSnapshot) {
+	r.DHSendLocal = s.dhSendLocal
+	r.DHRecvRemote = s.dhRecvRemote
+	r.RootKey = s.rootKey
+	r.SendChainKey = s.sendChainKey
+	r.RecvChainKey = s.recvChainKey
+	r.Ns = s.ns
+	r.Nr = s.nr
+	r.Pn = s.pn
+	r.SkippedKeys = s.skippedKeys
+}
+
+func cloneBytes(b []byte) []byte {
+	if b == nil {
+		return nil
+	}
+	c := make([]byte, len(b))
+	copy(c, b)
+	return c
 }
 
 func (r *DoubleRatchet) skipMessageKeys(untilSeq uint32) error {
 	if r.RecvChainKey == nil {
 		return nil
+	}
+
+	// Prune expired skipped keys older than 7 days to bounded storage
+	cutoff := time.Now().Add(-7 * 24 * time.Hour)
+	for k, sk := range r.SkippedKeys {
+		if sk.CreatedAt.Before(cutoff) {
+			ZeroBytes(sk.Key)
+			delete(r.SkippedKeys, k)
+		}
 	}
 
 	for r.Nr < untilSeq {
