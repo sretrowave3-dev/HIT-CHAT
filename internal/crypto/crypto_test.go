@@ -179,3 +179,38 @@ func TestDoubleRatchetEndToEnd(t *testing.T) {
 		t.Fatalf("M3 mismatch: got %s, want %s", dec3, msg3)
 	}
 }
+
+func TestPairwiseIsolationAndDowngradeRejection(t *testing.T) {
+	// 1. Normal pairwise encryption between alice and bob
+	msg := []byte("Strict pairwise confidential message")
+	iv, cipher, tag, err := EncryptPairwisePayload("alice", "bob", msg)
+	if err != nil {
+		t.Fatalf("pairwise encryption failed: %v", err)
+	}
+
+	decrypted, err := DecryptPairwisePayload("alice", "bob", iv, cipher, tag)
+	if err != nil {
+		t.Fatalf("pairwise decryption failed: %v", err)
+	}
+	if !bytes.Equal(msg, decrypted) {
+		t.Fatalf("decrypted text mismatch")
+	}
+
+	// 2. Third party (charlie and eve) MUST NOT be able to decrypt alice and bob's message
+	_, err = DecryptPairwisePayload("charlie", "eve", iv, cipher, tag)
+	if err == nil {
+		t.Fatalf("security violation: third party charlie/eve decrypted alice/bob message!")
+	}
+
+	// 3. Attacker encrypts message with the demo campus key and attempts to inject as Alice
+	ivDemo, cipherDemo, tagDemo, err := EncryptMessagePayload([]byte("Forged attacker message"))
+	if err != nil {
+		t.Fatalf("failed demo encryption: %v", err)
+	}
+
+	// DecryptPairwisePayload MUST REJECT the forged message (no downgrade attack)
+	_, err = DecryptPairwisePayload("alice", "bob", ivDemo, cipherDemo, tagDemo)
+	if err == nil {
+		t.Fatalf("security vulnerability: DecryptPairwisePayload accepted forged message encrypted with campus demo key!")
+	}
+}

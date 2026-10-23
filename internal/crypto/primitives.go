@@ -116,8 +116,9 @@ func CanonicalHandle(h string) string {
 	return clean
 }
 
-// DerivePairwiseKey derives an isolated pairwise AES-256 key for conversation confidentiality between two peers.
-func DerivePairwiseKey(user1, user2 string) []byte {
+// DerivePairwiseKey derives an isolated pairwise AES-256 key using RFC 5869 HKDF-SHA256
+// with domain separation and unambiguous length-prefixed participant identifiers.
+func DerivePairwiseKey(user1, user2 string) ([]byte, error) {
 	u1 := CanonicalHandle(user1)
 	u2 := CanonicalHandle(user2)
 	var first, second string
@@ -126,27 +127,33 @@ func DerivePairwiseKey(user1, user2 string) []byte {
 	} else {
 		first, second = u2, u1
 	}
-	secretStr := fmt.Sprintf("%s:%s:%s", SharedCampusSecret, first, second)
-	hash := sha256.Sum256([]byte(secretStr))
-	return hash[:]
+
+	salt := []byte("CampusNet_Pairwise_Salt_v1")
+	ikm := []byte(SharedCampusSecret)
+	info := []byte(fmt.Sprintf("CampusNet-v1-Pairwise:%d:%s:%d:%s", len(first), first, len(second), second))
+
+	return HKDFDerive(salt, ikm, info, 32)
 }
 
 // EncryptPairwisePayload encrypts plaintext with the pairwise key isolated to sender and recipient.
 func EncryptPairwisePayload(sender, recipient string, plaintext []byte) (iv, ciphertext, tag []byte, err error) {
-	key := DerivePairwiseKey(sender, recipient)
+	key, err := DerivePairwiseKey(sender, recipient)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("deriving pairwise key: %w", err)
+	}
+	defer ZeroBytes(key)
 	return EncryptPayload(key, plaintext, nil)
 }
 
-// DecryptPairwisePayload decrypts ciphertext with the pairwise key, falling back cleanly to the shared campus key.
+// DecryptPairwisePayload decrypts ciphertext with the pairwise key.
+// STRICT ZERO-DOWNGRADE INVARIANT: Only the pairwise key derived for this conversation is accepted.
 func DecryptPairwisePayload(sender, recipient string, nonce, ciphertext, authTag []byte) ([]byte, error) {
-	pairwiseKey := DerivePairwiseKey(sender, recipient)
-	plain, err := DecryptPayload(pairwiseKey, nonce, ciphertext, authTag, nil)
-	if err == nil {
-		return plain, nil
+	pairwiseKey, err := DerivePairwiseKey(sender, recipient)
+	if err != nil {
+		return nil, fmt.Errorf("deriving pairwise key: %w", err)
 	}
-	// Backward-compatibility fallback
-	campusKey := DeriveCampusKey()
-	return DecryptPayload(campusKey, nonce, ciphertext, authTag, nil)
+	defer ZeroBytes(pairwiseKey)
+	return DecryptPayload(pairwiseKey, nonce, ciphertext, authTag, nil)
 }
 
 // DeriveCampusKey derives the 32-byte AES-256 key matching WebCrypto SHA-256 derivation.

@@ -32,6 +32,37 @@ export function getPairwiseSecret(user1: string, user2: string): string {
 
 export class WebRatchet {
   /**
+   * Derives a pairwise AES-256 key matching Go's RFC 5869 HKDF-SHA256 derivation.
+   */
+  static async derivePairwiseKey(user1: string, user2: string): Promise<CryptoKey> {
+    const u1 = canonicalHandle(user1);
+    const u2 = canonicalHandle(user2);
+    const [first, second] = u1 <= u2 ? [u1, u2] : [u2, u1];
+    const enc = new TextEncoder();
+
+    const baseKey = await window.crypto.subtle.importKey(
+      'raw',
+      enc.encode('CampusNet_Ratchet_Shared_Demo_Secret'),
+      'HKDF',
+      false,
+      ['deriveKey']
+    );
+
+    return window.crypto.subtle.deriveKey(
+      {
+        name: 'HKDF',
+        hash: 'SHA-256',
+        salt: enc.encode('CampusNet_Pairwise_Salt_v1'),
+        info: enc.encode(`CampusNet-v1-Pairwise:${first.length}:${first}:${second.length}:${second}`),
+      },
+      baseKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+  }
+
+  /**
    * Generates isolated pairwise secret for two communicating peers.
    */
   static getPairwiseSecret(user1: string, user2: string): string {
@@ -54,16 +85,16 @@ export class WebRatchet {
   }
 
   /**
-   * Encrypts plaintext message into an E2EE envelope.
+   * Encrypts plaintext message into an E2EE envelope using RFC 5869 HKDF pairwise key.
    */
   static async encryptMessage(
     sender: string,
     recipient: string,
     plaintext: string,
     ttlMS: number,
-    sessionSecret: string
+    _sessionSecret?: string
   ): Promise<WebEnvelope> {
-    const key = await this.deriveKey(sessionSecret);
+    const key = await this.derivePairwiseKey(sender, recipient);
     const enc = new TextEncoder();
     const data = enc.encode(plaintext);
 
@@ -104,10 +135,11 @@ export class WebRatchet {
   }
 
   /**
-   * Decrypts an incoming E2EE envelope.
+   * Decrypts an incoming E2EE envelope using pairwise HKDF key.
+   * ZERO-DOWNGRADE: Rejects messages not encrypted with this conversation's pairwise key.
    */
-  static async decryptMessage(env: WebEnvelope, sessionSecret: string): Promise<string> {
-    const key = await this.deriveKey(sessionSecret);
+  static async decryptMessage(env: WebEnvelope, _sessionSecret?: string): Promise<string> {
+    const key = await this.derivePairwiseKey(env.sender_id, env.recipient_id);
 
     const ivBytes = Uint8Array.from(atob(env.iv), c => c.charCodeAt(0));
     const cipherBytes = Uint8Array.from(atob(env.ciphertext), c => c.charCodeAt(0));
@@ -133,14 +165,9 @@ export class WebRatchet {
   }
 
   /**
-   * Attempts pairwise decryption first; if fail, falls back to legacy shared campus secret.
+   * Decrypts with strict pairwise verification (no downgrade fallback).
    */
-  static async decryptWithPairwiseFallback(env: WebEnvelope, fallbackSecret: string): Promise<string> {
-    const pairwiseSecret = getPairwiseSecret(env.sender_id, env.recipient_id);
-    try {
-      return await this.decryptMessage(env, pairwiseSecret);
-    } catch {
-      return await this.decryptMessage(env, fallbackSecret);
-    }
+  static async decryptWithPairwiseFallback(env: WebEnvelope, _fallbackSecret?: string): Promise<string> {
+    return await this.decryptMessage(env);
   }
 }
