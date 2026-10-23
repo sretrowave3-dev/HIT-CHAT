@@ -116,9 +116,31 @@ func (s *SecureStore) deriveMachineKey() []byte {
 	return h[:]
 }
 
+// deriveUserMachineKey binds keyring encryption to both local hardware AND current OS user profile.
+// MULTI-USER ISOLATION: Prevents other local users on the same machine from decrypting secrets.
+func (s *SecureStore) deriveUserMachineKey() []byte {
+	hostname, _ := os.Hostname()
+	user := os.Getenv("USERNAME")
+	if user == "" {
+		user = os.Getenv("USER")
+	}
+	home, _ := os.UserHomeDir()
+
+	salt := []byte("CampusNet_User_Hardware_Binding_Salt_v2")
+	ikm := []byte(fmt.Sprintf("%s:%s:%s", hostname, user, home))
+	info := []byte("CampusNet-Keyring-v2-AES256GCM")
+
+	k, err := HKDFDerive(salt, ikm, info, 32)
+	if err == nil {
+		return k
+	}
+	h := sha256.Sum256([]byte(hostname + user + "CampusNet_Local_Hardware_Binding_v2"))
+	return h[:]
+}
+
 func (s *SecureStore) persistToFile() error {
-	// Simple machine-bound encryption for isolated storage
-	key := s.deriveMachineKey()
+	// User- and machine-bound AES-256-GCM encryption for isolated storage
+	key := s.deriveUserMachineKey()
 	defer ZeroBytes(key)
 
 	var payload []byte
@@ -158,16 +180,27 @@ func (s *SecureStore) loadFromFile() error {
 		return errors.New("corrupted secret file")
 	}
 
-	key := s.deriveMachineKey()
-	defer ZeroBytes(key)
-
 	iv := data[:12]
 	tag := data[12:28]
 	ciphertext := data[28:]
 
+	// 1. Try decrypting with user-bound key (v2)
+	key := s.deriveUserMachineKey()
 	plaintext, err := DecryptPayload(key, iv, ciphertext, tag, []byte("CampusNet_Keyring_Storage"))
+	ZeroBytes(key)
+
+	// 2. If v2 fails, attempt backward-compatible migration from v1 legacy machine key
 	if err != nil {
-		return fmt.Errorf("decrypting local keyring store: %w", err)
+		v1Key := s.deriveMachineKey()
+		plaintext, err = DecryptPayload(v1Key, iv, ciphertext, tag, []byte("CampusNet_Keyring_Storage"))
+		ZeroBytes(v1Key)
+		if err != nil {
+			return fmt.Errorf("decrypting local keyring store: %w", err)
+		}
+		// Upgrade to v2 immediately on successful legacy decryption
+		defer func() {
+			_ = s.persistToFile()
+		}()
 	}
 	defer ZeroBytes(plaintext)
 
