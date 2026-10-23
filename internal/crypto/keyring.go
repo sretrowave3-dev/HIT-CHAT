@@ -1,12 +1,14 @@
 package crypto
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -107,6 +109,25 @@ func (s *SecureStore) PurgeAll() {
 		ZeroBytes(val)
 		delete(s.memoryMap, k)
 	}
+}
+
+// VerifyOrTrackPeerIdentity verifies whether the remote peer's identity key matches
+// the previously recorded key for that user. If it has changed, it returns changed=true.
+func (s *SecureStore) VerifyOrTrackPeerIdentity(peerHandle string, peerIKPub []byte) (changed bool, err error) {
+	cleanHandle := strings.TrimPrefix(strings.ToLower(peerHandle), "@")
+	recordKey := "peer_ik:" + cleanHandle
+
+	existing, err := s.Get(recordKey)
+	if err == nil && len(existing) > 0 {
+		if !bytes.Equal(existing, peerIKPub) {
+			return true, nil // Key has changed! Loud alert needed
+		}
+		return false, nil // Key unchanged
+	}
+
+	// First time encountering peer, pin their identity key
+	_ = s.Set(recordKey, peerIKPub)
+	return false, nil
 }
 
 func (s *SecureStore) deriveMachineKey() []byte {

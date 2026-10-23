@@ -340,3 +340,35 @@ func TestDoubleRatchetStateRollbackOnFailedDecrypt(t *testing.T) {
 		t.Fatalf("decrypted message mismatch: got %s, want %s", dec2, m2)
 	}
 }
+
+
+func TestSafetyNumberDeterministicAndSymmetric(t *testing.T) {
+	aliceIK, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobIK, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Alice computes safety number with Bob
+	aliceView := ComputeSafetyNumber(aliceIK.PublicKey, bobIK.PublicKey, "alice", "bob")
+
+	// Bob computes safety number with Alice (inverted argument order)
+	bobView := ComputeSafetyNumber(bobIK.PublicKey, aliceIK.PublicKey, "bob", "alice")
+
+	if aliceView == "" {
+		t.Fatalf("safety number returned empty string")
+	}
+	if aliceView != bobView {
+		t.Fatalf("safety numbers must be symmetric: Alice computed %q, Bob computed %q", aliceView, bobView)
+	}
+
+	// Attacker with different key MUST produce different safety number
+	eveIK, _ := GenerateKeyPair()
+	eveView := ComputeSafetyNumber(aliceIK.PublicKey, eveIK.PublicKey, "alice", "bob")
+	if aliceView == eveView {
+		t.Fatalf("safety number collision detected between legitimate Bob and attacker Eve!")
+	}
+}

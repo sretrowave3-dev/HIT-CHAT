@@ -62,3 +62,38 @@ func TestSecureStoreUserIsolationAndPersistence(t *testing.T) {
 		t.Fatalf("expected ErrSecretNotFound after deletion, got %v", err)
 	}
 }
+
+
+func TestPeerIdentityKeyChangeDetection(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "campusnet_test_store_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	store := &SecureStore{
+		memoryMap: make(map[string][]byte),
+		storePath: filepath.Join(tempDir, "test_ik_tracking.enc"),
+	}
+
+	bobKP1, _ := GenerateKeyPair()
+	bobKP2, _ := GenerateKeyPair()
+
+	// 1. Initial contact with Bob: pin Bob's identity key
+	changed, err := store.VerifyOrTrackPeerIdentity("bob", bobKP1.PublicKey)
+	if err != nil || changed {
+		t.Fatalf("initial identity pinning should return changed=false, got changed=%v, err=%v", changed, err)
+	}
+
+	// 2. Subsequent contact with unchanged key: must return changed=false
+	changed, err = store.VerifyOrTrackPeerIdentity("@bob", bobKP1.PublicKey)
+	if err != nil || changed {
+		t.Fatalf("expected unchanged identity key verification, got changed=%v", changed)
+	}
+
+	// 3. Compromised / swapped pre-key bundle for Bob with new key: must trigger loud changed=true
+	changed, err = store.VerifyOrTrackPeerIdentity("bob", bobKP2.PublicKey)
+	if err != nil || !changed {
+		t.Fatalf("CRITICAL: Key change detection failed! Expected changed=true on peer key swap, got changed=%v", changed)
+	}
+}

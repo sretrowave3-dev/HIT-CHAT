@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -330,6 +331,17 @@ func RunSend(serverURL, fromUser, toUser, messageText string, ttlMS int64) error
 
 	if !bundleFound {
 		return fmt.Errorf("recipient '%s' not registered on campus network", toUserClean)
+	}
+
+	// Verify and track peer identity key to alert against MITM key-swapping attacks
+	secStore, _ := crypto.NewSecureStore()
+	if secStore != nil && bundle.IdentityKey != "" {
+		if rawIK, err := hex.DecodeString(bundle.IdentityKey); err == nil && len(rawIK) > 0 {
+			changed, _ := secStore.VerifyOrTrackPeerIdentity(toUserClean, rawIK)
+			if changed {
+				fmt.Fprintf(os.Stderr, "\n[SECURITY WARNING] Peer @%s's Identity Key has CHANGED! Potential MITM attack or device re-registration.\n", toUserClean)
+			}
+		}
 	}
 
 	plaintextBytes := []byte(messageText)

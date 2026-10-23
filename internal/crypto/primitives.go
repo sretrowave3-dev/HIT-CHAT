@@ -1,12 +1,14 @@
 package crypto
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdh"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -247,4 +249,45 @@ func ZeroBytes(b []byte) {
 func newCipherBlock(key []byte) (cipher.Block, error) {
 	// AES-256 block creation
 	return aes.NewCipher(key)
+}
+
+// ComputeSafetyNumber derives a symmetric, tamper-evident visual verification code
+// between two parties from their public identity keys and usernames.
+// Format: 6 blocks of 5 decimal digits (e.g. 12345-67890-...).
+func ComputeSafetyNumber(localIK, remoteIK []byte, localHandle, remoteHandle string) string {
+	u1 := strings.TrimPrefix(strings.ToLower(localHandle), "@")
+	u2 := strings.TrimPrefix(strings.ToLower(remoteHandle), "@")
+
+	var firstKey, secondKey []byte
+	var firstUser, secondUser string
+
+	// Canonical lexicographical ordering of keys
+	if bytes.Compare(localIK, remoteIK) < 0 {
+		firstKey, secondKey = localIK, remoteIK
+		firstUser, secondUser = u1, u2
+	} else {
+		firstKey, secondKey = remoteIK, localIK
+		firstUser, secondUser = u2, u1
+	}
+
+	context := fmt.Sprintf("CampusNet-SafetyNumber-v1:%d:%s:%d:%s", len(firstUser), firstUser, len(secondUser), secondUser)
+	salt := []byte("CampusNet_Identity_Salt_2026")
+
+	ikMaterial := append(append([]byte{}, firstKey...), secondKey...)
+	digest, err := HKDFDerive(salt, ikMaterial, []byte(context), 32)
+	if err != nil {
+		h := sha256.Sum256(append(ikMaterial, []byte(context)...))
+		digest = h[:]
+	}
+
+	var sb strings.Builder
+	for i := 0; i < 6; i++ {
+		chunk := binary.BigEndian.Uint32(digest[i*4 : (i+1)*4])
+		val := chunk % 100000
+		if i > 0 {
+			sb.WriteString("-")
+		}
+		sb.WriteString(fmt.Sprintf("%05d", val))
+	}
+	return sb.String()
 }
