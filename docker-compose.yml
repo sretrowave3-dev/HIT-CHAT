@@ -10,9 +10,12 @@ services:
       --maxmemory-policy volatile-ttl 
       --notify-keyspace-events KEA 
       --appendonly no
+      --save ""
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -27,11 +30,13 @@ services:
       POSTGRES_USER: campusnet
       POSTGRES_PASSWORD: campusnet_secret
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U campusnet -d campusnet"]
       interval: 5s
@@ -49,6 +54,8 @@ services:
       - JWT_SECRET=campusnet-production-session-secret-change-in-prod
     ports:
       - "8080:8080"
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       redis:
         condition: service_healthy
