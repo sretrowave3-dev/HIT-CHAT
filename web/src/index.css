@@ -4,21 +4,77 @@
 
 @layer base {
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: 'Mukta', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px;
+    background-color: #C8141A;
+    color: #2A0A08;
+    line-height: 1.5;
   }
 }
 
-/* Custom scrollbars */
+/* Global grain: subtle inline SVG noise overlay at ~8% opacity over whole app */
+.poster-grain-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.08;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
+
+/* Halftone dot pattern in ONE corner of the layout only (bottom-right) */
+.poster-corner-halftone {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 180px;
+  height: 180px;
+  pointer-events: none;
+  background-image: radial-gradient(#2A0A08 20%, transparent 20%);
+  background-position: 0 0;
+  background-size: 10px 10px;
+  opacity: 0.15;
+  mask-image: radial-gradient(circle at bottom right, black 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(circle at bottom right, black 30%, transparent 75%);
+}
+
+/* Flat poster button with hard offset shadow and crisp pressed state */
+.poster-btn {
+  border: 2px solid #2A0A08;
+  box-shadow: 4px 4px 0px #2A0A08;
+  transition: transform 0.06s ease, box-shadow 0.06s ease;
+}
+.poster-btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0px #2A0A08;
+}
+
+/* Chunky 3D headline type with hard drop shadow and flat yellow-to-mustard split */
+.poster-split-title {
+  background: linear-gradient(to bottom, #F7D63C 50%, #F2A33A 50%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(4px 4px 0px #2A0A08);
+}
+
+.poster-hard-title {
+  text-shadow: 4px 4px 0px #2A0A08;
+}
+
+/* Flat sharp scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #111827;
+  background: #F4E7C8;
+  border-left: 2px solid #2A0A08;
 }
 ::-webkit-scrollbar-thumb {
-  background: #374151;
-  border-radius: 3px;
+  background: #2A0A08;
+  border-radius: 0px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #4b5563;
+  background: #8E0E12;
 }

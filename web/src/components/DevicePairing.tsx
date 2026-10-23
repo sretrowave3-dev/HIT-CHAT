@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Terminal, Check, AlertCircle, X, Zap } from 'lucide-react';
+import { IconClose } from './PosterMotifs.tsx';
 
 interface DevicePairingProps {
   userHandle: string;
@@ -65,7 +65,7 @@ export const DevicePairing: React.FC<DevicePairingProps> = ({
 
       if (!res.ok) {
         const data = await res.json();
-        throw new Error(data.error || 'Failed to auto-authorize device');
+        throw new Error(data.error || 'Failed to authorize terminal');
       }
 
       setStatus('success');
@@ -76,7 +76,7 @@ export const DevicePairing: React.FC<DevicePairingProps> = ({
       }, 1500);
     } catch (err: any) {
       setStatus('error');
-      setErrorMessage(err.message || 'Auto-authorization error');
+      setErrorMessage(err.message || 'Authorization failed');
     }
   };
 
@@ -89,104 +89,109 @@ export const DevicePairing: React.FC<DevicePairingProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="bg-cyber-800 border border-cyber-700 w-full max-w-md rounded-2xl p-6 shadow-2xl relative">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-poster-ink/75 p-4">
+      <div className="bg-poster-cream border-2 border-poster-ink shadow-hard w-full max-w-md p-6 relative rounded-none">
+        {/* Close Button */}
         <button
+          type="button"
           onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-gray-200"
+          className="poster-btn absolute top-4 right-4 p-1.5 bg-white hover:bg-poster-red hover:text-white text-poster-ink"
+          title="CLOSE"
         >
-          <X className="w-5 h-5" />
+          <IconClose size={16} />
         </button>
 
-        <div className="flex items-center gap-3 mb-4">
-          <div className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/30">
-            <Terminal className="w-6 h-6" />
+        {/* Header */}
+        <div className="mb-5 pb-3 border-b-2 border-poster-ink">
+          <div className="font-mono text-[10px] font-bold text-poster-deepred uppercase tracking-widest">
+            RFC 8628 / DEVICE FLOW
           </div>
-          <div>
-            <h3 className="text-lg font-bold text-gray-100">Authorize CLI Terminal</h3>
-            <p className="text-xs text-gray-400">Link headless terminal session to @{userHandle}</p>
-          </div>
+          <h3 className="font-bungee text-2xl text-poster-ink tracking-wide mt-0.5">
+            PAIR DEVICE
+          </h3>
+          <p className="font-mono text-xs text-poster-ink uppercase mt-1">
+            LINK TERMINAL SESSION TO @{userHandle.toUpperCase()}
+          </p>
         </div>
 
         {/* Pending Terminal Detection Banner */}
         {pendingDevices.length > 0 && (
-          <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl mb-4 flex items-center justify-between gap-3">
+          <div className="p-3 bg-poster-yellow border-2 border-poster-ink shadow-hard-sm mb-5 flex items-center justify-between gap-3">
             <div>
-              <div className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
-                <Zap className="w-3.5 h-3.5" />
-                <span>Pending Terminal Detected</span>
+              <div className="font-mono text-[11px] font-bold text-poster-ink uppercase">
+                PENDING REQUEST
               </div>
-              <div className="text-xs font-mono text-gray-300 mt-0.5">
-                Code: <span className="text-emerald-300 font-bold">{pendingDevices[0].user_code}</span> ({pendingDevices[0].platform})
+              <div className="font-mono text-sm font-bold text-poster-ink mt-0.5">
+                CODE: {pendingDevices[0].user_code}
               </div>
             </div>
             <button
               type="button"
               disabled={status === 'authorizing'}
               onClick={() => handleAutoAuthorize(pendingDevices[0].user_code)}
-              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-md transition whitespace-nowrap flex items-center gap-1"
+              className="poster-btn px-3 py-1.5 bg-poster-mustard hover:bg-white text-poster-ink font-bungee text-xs uppercase"
             >
-              <Zap className="w-3 h-3" />
-              <span>1-Click Authorize</span>
+              1-CLICK PAIR
             </button>
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-gray-300 uppercase tracking-wider mb-1.5">
-              Terminal Pairing Code
+            <label
+              htmlFor="pairing-code"
+              className="block font-mono text-xs font-bold text-poster-ink uppercase tracking-wider mb-2"
+            >
+              ENTER PAIRING CODE
             </label>
             <input
+              id="pairing-code"
               type="text"
-              placeholder="e.g. CNET-8429-K7P2"
+              placeholder="CNET-XXXX-XXXX"
               value={userCode}
               onChange={e => setUserCode(e.target.value)}
-              className="w-full px-4 py-2.5 bg-cyber-900 border border-gray-700 rounded-xl text-center font-mono text-base tracking-widest uppercase text-emerald-400 focus:outline-none focus:border-emerald-500"
+              className="w-full px-4 py-3 bg-white border-2 border-poster-ink text-center font-mono text-base sm:text-lg font-bold tracking-widest uppercase text-poster-ink shadow-hard-sm focus:outline-none focus:bg-poster-cream rounded-none placeholder:text-poster-ink/30"
             />
           </div>
 
           {status === 'error' && (
-            <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-400">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{errorMessage}</span>
+            <div className="p-3 bg-poster-red text-white border-2 border-poster-ink font-mono text-xs uppercase font-bold">
+              ERROR: {errorMessage}
             </div>
           )}
 
           {status === 'success' && (
-            <div className="flex items-center gap-2 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 font-semibold">
-              <Check className="w-4 h-4 shrink-0" />
-              <span>Terminal device linked successfully!</span>
+            <div className="p-3 bg-poster-green text-white border-2 border-poster-ink font-mono text-xs uppercase font-bold">
+              DEVICE LINKED SUCCESSFULLY
             </div>
           )}
 
-          <div className="flex gap-3">
+          <div className="flex gap-3 pt-2">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2.5 bg-cyber-700 hover:bg-cyber-600 text-gray-300 text-sm font-semibold rounded-xl transition"
+              className="poster-btn flex-1 px-4 py-2.5 bg-white hover:bg-poster-cream text-poster-ink font-mono text-xs uppercase font-bold"
             >
-              Cancel
+              CANCEL
             </button>
             <button
               type="submit"
               disabled={status === 'authorizing'}
-              className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold rounded-xl shadow-lg shadow-emerald-900/30 transition"
+              className="poster-btn flex-1 px-4 py-2.5 bg-poster-mustard hover:bg-poster-yellow disabled:opacity-50 text-poster-ink font-bungee text-sm uppercase"
             >
-              {status === 'authorizing' ? 'Verifying...' : 'Authorize Device'}
+              {status === 'authorizing' ? 'VERIFYING…' : 'AUTHORIZE'}
             </button>
           </div>
 
           {pendingDevices.length === 0 && (
-            <div className="pt-2 text-center border-t border-gray-700/50">
+            <div className="pt-2 text-center border-t border-poster-ink">
               <button
                 type="button"
                 disabled={status === 'authorizing'}
                 onClick={() => handleAutoAuthorize()}
-                className="text-xs text-emerald-400 hover:text-emerald-300 font-medium flex items-center justify-center gap-1.5 w-full py-1 transition"
+                className="font-mono text-xs font-bold text-poster-deepred hover:underline uppercase inline-block py-1"
               >
-                <Zap className="w-3.5 h-3.5" />
-                <span>⚡ Auto-Authorize Any Pending Terminal</span>
+                AUTO-AUTHORIZE LATEST LOCAL TERMINAL
               </button>
             </div>
           )}

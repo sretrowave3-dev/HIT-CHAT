@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Flame } from 'lucide-react';
 
 interface CountdownTimerProps {
   timestampMS: number;
@@ -21,7 +20,6 @@ export const CountdownTimer: React.FC<CountdownTimerProps> = ({
     const clientElapsed = now - arrivalTimeRef.current;
     const serverElapsed = now - (timestampMS || arrivalTimeRef.current);
 
-    // If server clock has skew (future or past), prioritize local elapsed reading time
     let elapsed = clientElapsed;
     if (serverElapsed > 0 && Math.abs(serverElapsed - clientElapsed) < 5000) {
       elapsed = Math.max(clientElapsed, serverElapsed);
@@ -46,25 +44,42 @@ export const CountdownTimer: React.FC<CountdownTimerProps> = ({
     return () => clearInterval(interval);
   }, [timestampMS, effectiveTTL]);
 
-  const percentage = Math.max(0, Math.min(100, (remaining / effectiveTTL) * 100));
+  const fraction = Math.max(0, Math.min(1, remaining / effectiveTTL));
   const seconds = (remaining / 1000).toFixed(1);
+  const totalBlocks = 8;
+  const activeBlocks = Math.ceil(fraction * totalBlocks);
 
-  const isLow = remaining < 3000;
+  // Color drops from green -> yellow/mustard -> red as time elapses
+  let blockColor = 'bg-poster-green';
+  if (fraction < 0.3) {
+    blockColor = 'bg-poster-red';
+  } else if (fraction < 0.6) {
+    blockColor = 'bg-poster-mustard';
+  }
 
   return (
-    <div className="flex items-center gap-1.5 text-xs font-mono font-medium">
-      <Flame className={`w-3.5 h-3.5 ${isLow ? 'text-red-500 animate-bounce' : 'text-amber-400'}`} />
-      <span className={isLow ? 'text-red-400 font-bold' : 'text-gray-400'}>
+    <div
+      className="inline-flex items-center gap-2 font-mono text-xs uppercase"
+      title={`BURN IN ${seconds}s`}
+    >
+      {/* Segmented bar of small square blocks */}
+      <div className="flex items-center gap-0.5" aria-hidden="true">
+        {Array.from({ length: totalBlocks }).map((_, i) => {
+          const isFilled = i < activeBlocks;
+          return (
+            <div
+              key={i}
+              className={`w-2 h-2.5 border border-poster-ink ${
+                isFilled ? blockColor : 'bg-transparent opacity-25'
+              }`}
+            />
+          );
+        })}
+      </div>
+
+      <span className="font-bold text-poster-ink tracking-tight">
         {seconds}s
       </span>
-      <div className="w-12 h-1.5 bg-gray-800 rounded-full overflow-hidden border border-gray-700">
-        <div
-          className={`h-full transition-all duration-100 ${
-            isLow ? 'bg-red-500' : 'bg-emerald-400'
-          }`}
-          style={{ width: `${percentage}%` }}
-        />
-      </div>
     </div>
   );
 };

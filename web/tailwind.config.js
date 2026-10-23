@@ -4,34 +4,45 @@ export default {
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
-  darkMode: 'class',
   theme: {
     extend: {
+      fontFamily: {
+        bungee: ['"Bungee"', 'sans-serif'],
+        yatra: ['"Yatra One"', 'cursive', 'sans-serif'],
+        mono: ['"Space Mono"', 'monospace'],
+        body: ['"Mukta"', 'sans-serif'],
+      },
       colors: {
-        cyber: {
-          900: '#0a0d14',
-          800: '#111827',
-          700: '#1f2937',
-          600: '#374151',
-          accent: '#10b981',
-          danger: '#ef4444',
-          warning: '#f59e0b',
+        poster: {
+          red: '#C8141A',
+          deepred: '#8E0E12',
+          mustard: '#F2A33A',
+          yellow: '#F7D63C',
+          green: '#2E8B3D',
+          cream: '#F4E7C8',
+          ink: '#2A0A08',
+          cobalt: '#1F4FD8',
         }
       },
-      animation: {
-        'burn-fade': 'burnFade 1s ease-out forwards',
-        'pulse-glow': 'pulseGlow 2s infinite',
+      boxShadow: {
+        'hard': '4px 4px 0px #2A0A08',
+        'hard-sm': '2px 2px 0px #2A0A08',
+        'hard-lg': '6px 6px 0px #2A0A08',
       },
-      keyframes: {
-        burnFade: {
-          '0%': { opacity: '1', transform: 'scale(1)', filter: 'blur(0)' },
-          '50%': { opacity: '0.8', transform: 'scale(0.98)', filter: 'blur(2px) contrast(150%)' },
-          '100%': { opacity: '0', transform: 'scale(0.9)', filter: 'blur(8px) contrast(200%)' }
-        },
-        pulseGlow: {
-          '0%, 100%': { opacity: '1' },
-          '50%': { opacity: '0.6' }
-        }
+      borderWidth: {
+        '2': '2px',
+        '3': '3px',
+      },
+      borderRadius: {
+        none: '0px',
+        sm: '2px',
+        DEFAULT: '4px',
+        md: '4px',
+        lg: '4px',
+        xl: '4px',
+        '2xl': '4px',
+        '3xl': '4px',
+        full: '9999px',
       }
     },
   },

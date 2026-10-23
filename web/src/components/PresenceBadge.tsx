@@ -1,73 +1,81 @@
 import React from 'react';
-import { Shield, ShieldAlert, Wifi, MapPin } from 'lucide-react';
+import { IconClose } from './PosterMotifs.tsx';
 
-interface PresenceBadgeProps {
+interface PrivacyInfoModalProps {
+  isOpen: boolean;
+  onClose: () => void;
   locationEnabled: boolean;
   zoneDisplayName: string;
   buildingName?: string;
   onTogglePrivacy: () => void;
 }
 
-export const PresenceBadge: React.FC<PresenceBadgeProps> = ({
+export const PrivacyInfoModal: React.FC<PrivacyInfoModalProps> = ({
+  isOpen,
+  onClose,
   locationEnabled,
   zoneDisplayName,
   buildingName,
   onTogglePrivacy,
 }) => {
+  if (!isOpen) return null;
+
   return (
-    <div className="flex items-center justify-between p-3 bg-cyber-800 border border-cyber-700 rounded-xl shadow-lg">
-      <div className="flex items-center gap-3">
-        <div
-          className={`p-2 rounded-lg ${
-            locationEnabled
-              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-              : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-          }`}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-poster-ink/75 p-4">
+      <div className="bg-poster-cream border-2 border-poster-ink shadow-hard w-full max-w-md p-6 relative rounded-none">
+        {/* Close Button */}
+        <button
+          type="button"
+          onClick={onClose}
+          className="poster-btn absolute top-4 right-4 p-1.5 bg-white hover:bg-poster-red hover:text-white text-poster-ink"
+          title="CLOSE"
         >
-          {locationEnabled ? <Wifi className="w-5 h-5 animate-pulse" /> : <Shield className="w-5 h-5" />}
-        </div>
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-              Campus Presence
-            </span>
-            <span
-              className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${
-                locationEnabled
-                  ? 'bg-emerald-500/20 text-emerald-300'
-                  : 'bg-amber-500/20 text-amber-300'
-              }`}
-            >
-              {locationEnabled ? 'Broadcasting AP Hash' : 'Privacy Zero-Bypass'}
-            </span>
+          <IconClose size={16} />
+        </button>
+
+        {/* Header */}
+        <div className="mb-4 pb-3 border-b-2 border-poster-ink">
+          <div className="font-mono text-[10px] font-bold text-poster-deepred uppercase tracking-widest">
+            PRIVACY SPECIFICATION / ZERO-BYPASS
           </div>
-          <div className="flex items-center gap-1.5 text-sm font-medium text-gray-200 mt-0.5">
-            {locationEnabled ? (
-              <>
-                <MapPin className="w-3.5 h-3.5 text-emerald-400" />
-                <span>{zoneDisplayName}</span>
-                {buildingName && <span className="text-gray-400 text-xs">({buildingName})</span>}
-              </>
-            ) : (
-              <>
-                <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
-                <span className="text-amber-300">Protected Mode (Null Vectors Dispatched)</span>
-              </>
-            )}
+          <h3 className="font-bungee text-2xl text-poster-ink tracking-wide mt-0.5">
+            LOCATION PRIVACY
+          </h3>
+        </div>
+
+        {/* Content */}
+        <div className="space-y-4">
+          <div className="p-3 bg-white border-2 border-poster-ink">
+            <div className="font-mono text-xs font-bold text-poster-ink uppercase">
+              CURRENT ZONE STATUS:
+            </div>
+            <div className="font-mono text-sm font-bold text-poster-deepred mt-1 uppercase">
+              {locationEnabled
+                ? `${zoneDisplayName}${buildingName ? ` (${buildingName})` : ''}`
+                : 'PRIVATE / NULL VECTORS DISPATCHED'}
+            </div>
+          </div>
+
+          <p className="font-body text-[15px] text-poster-ink leading-relaxed">
+            When location is concealed, the client transmits zeroed telemetry vectors.
+            When broadcasting, Wi-Fi BSSID access point identifiers are HMAC-hashed with
+            campus salt prior to dispatch.
+          </p>
+
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={onTogglePrivacy}
+              className="poster-btn w-full px-4 py-2.5 bg-poster-mustard hover:bg-poster-yellow text-poster-ink font-bungee text-xs uppercase"
+            >
+              {locationEnabled ? 'CONCEAL LOCATION (NULL VECTORS)' : 'BROADCAST CAMPUS ZONE'}
+            </button>
           </div>
         </div>
       </div>
-
-      <button
-        onClick={onTogglePrivacy}
-        className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors border ${
-          locationEnabled
-            ? 'bg-cyber-700 hover:bg-cyber-600 text-gray-300 border-gray-600'
-            : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-900/30'
-        }`}
-      >
-        {locationEnabled ? 'Conceal Location' : 'Share Campus Zone'}
-      </button>
     </div>
   );
 };
+
+// Also export as PresenceBadge for backward-compatibility if imported
+export const PresenceBadge = PrivacyInfoModal;
