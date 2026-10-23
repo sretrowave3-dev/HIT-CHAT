@@ -8,12 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
 var (
 	ErrTokenExpired = errors.New("authentication token has expired")
 	ErrTokenInvalid = errors.New("invalid signature or malformed token")
+	ErrTokenRevoked = errors.New("authentication token or device has been revoked")
 )
 
 type DeviceClaims struct {
@@ -25,7 +27,10 @@ type DeviceClaims struct {
 }
 
 type TokenManager struct {
-	secretKey []byte
+	secretKey      []byte
+	mu             sync.RWMutex
+	revokedTokens  map[string]bool // token signature -> bool
+	revokedDevices map[string]bool // deviceID -> bool
 }
 
 func NewTokenManager(secret string) *TokenManager {
@@ -33,8 +38,42 @@ func NewTokenManager(secret string) *TokenManager {
 		secret = "campusnet-dev-session-secret-change-in-production-2026"
 	}
 	return &TokenManager{
-		secretKey: []byte(secret),
+		secretKey:      []byte(secret),
+		revokedTokens:  make(map[string]bool),
+		revokedDevices: make(map[string]bool),
 	}
+}
+
+// RevokeToken marks a specific JWT token signature as revoked.
+func (tm *TokenManager) RevokeToken(tokenString string) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	parts := strings.Split(tokenString, ".")
+	if len(parts) == 3 {
+		tm.revokedTokens[parts[2]] = true
+	} else {
+		tm.revokedTokens[tokenString] = true
+	}
+}
+
+// RevokeDevice revokes all active and future sessions for a specific device ID.
+func (tm *TokenManager) RevokeDevice(deviceID string) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.revokedDevices[deviceID] = true
+}
+
+// IsRevoked checks if a token signature or device ID has been revoked.
+func (tm *TokenManager) IsRevoked(tokenSig, deviceID string) bool {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	if tm.revokedTokens[tokenSig] {
+		return true
+	}
+	if deviceID != "" && tm.revokedDevices[deviceID] {
+		return true
+	}
+	return false
 }
 
 // GenerateDeviceToken signs a compact JWT containing device claims.
@@ -120,6 +159,11 @@ func (tm *TokenManager) ValidateToken(tokenString string) (*DeviceClaims, error)
 	// Defend against future-dated token fraud
 	if claims.IssuedAt > now+300 {
 		return nil, ErrTokenInvalid
+	}
+
+	// 4. Server-Side Revocation Check (protects against stolen tokens & infostealers)
+	if tm.IsRevoked(parts[2], claims.DeviceID) {
+		return nil, ErrTokenRevoked
 	}
 
 	return &claims, nil

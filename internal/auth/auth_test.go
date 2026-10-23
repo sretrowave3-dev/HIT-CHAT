@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -132,5 +133,45 @@ func TestJWTAlgorithmPinning(t *testing.T) {
 	_, err = tokenMgr.ValidateToken(rsToken)
 	if err == nil {
 		t.Fatalf("security violation: TokenManager accepted RS256 algorithm token!")
+	}
+}
+
+
+func TestTokenRevocationRegistry(t *testing.T) {
+	tokenMgr := NewTokenManager("test-revocation-secret-key-32-chars!")
+
+	token1, err := tokenMgr.GenerateDeviceToken("dev-revoked-1", "alice", "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token2, err := tokenMgr.GenerateDeviceToken("dev-active-2", "bob", "cli")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Both valid before revocation
+	if _, err := tokenMgr.ValidateToken(token1); err != nil {
+		t.Fatalf("token1 should be valid, got: %v", err)
+	}
+	if _, err := tokenMgr.ValidateToken(token2); err != nil {
+		t.Fatalf("token2 should be valid, got: %v", err)
+	}
+
+	// 1. Revoke token1 specifically
+	tokenMgr.RevokeToken(token1)
+
+	if _, err := tokenMgr.ValidateToken(token1); !errors.Is(err, ErrTokenRevoked) {
+		t.Fatalf("expected ErrTokenRevoked for revoked token1, got: %v", err)
+	}
+
+	// token2 remains valid
+	if _, err := tokenMgr.ValidateToken(token2); err != nil {
+		t.Fatalf("token2 should still be valid, got: %v", err)
+	}
+
+	// 2. Revoke device for token2
+	tokenMgr.RevokeDevice("dev-active-2")
+	if _, err := tokenMgr.ValidateToken(token2); !errors.Is(err, ErrTokenRevoked) {
+		t.Fatalf("expected ErrTokenRevoked for device-revoked token2, got: %v", err)
 	}
 }
