@@ -37,11 +37,12 @@ func AliceInitiateHandshake(
 		return nil, ErrMissingKeyBundle
 	}
 
-	// Verify Bob's SPK signature if signing key is provided
-	if len(bobBundle.IdentitySigningKey) == 32 && len(bobBundle.SignedPreKeySig) == 64 {
-		if !ed25519.Verify(bobBundle.IdentitySigningKey, bobBundle.SignedPreKey, bobBundle.SignedPreKeySig) {
-			return nil, ErrSignatureInvalid
-		}
+	// Verify Bob's SPK signature strictly (mandatory Ed25519 authentication)
+	if len(bobBundle.IdentitySigningKey) != ed25519.PublicKeySize || len(bobBundle.SignedPreKeySig) != ed25519.SignatureSize {
+		return nil, ErrSignatureInvalid
+	}
+	if !ed25519.Verify(bobBundle.IdentitySigningKey, bobBundle.SignedPreKey, bobBundle.SignedPreKeySig) {
+		return nil, ErrSignatureInvalid
 	}
 
 	// 1. Generate Alice's Ephemeral Key Pair (EK_A)

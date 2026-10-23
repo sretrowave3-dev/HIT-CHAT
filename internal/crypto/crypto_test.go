@@ -2,6 +2,8 @@ package crypto
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"errors"
 	"testing"
 )
 
@@ -86,10 +88,18 @@ func TestX3DHHandshake(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	bobSignPub, bobSignPriv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobSPKSig := ed25519.Sign(bobSignPriv, bobSPK.PublicKey)
+
 	bobBundle := &PreKeyBundle{
-		IdentityKey:   bobIK.PublicKey,
-		SignedPreKey:  bobSPK.PublicKey,
-		OneTimePreKey: bobOTK.PublicKey,
+		IdentityKey:        bobIK.PublicKey,
+		IdentitySigningKey: bobSignPub,
+		SignedPreKey:       bobSPK.PublicKey,
+		SignedPreKeySig:    bobSPKSig,
+		OneTimePreKey:      bobOTK.PublicKey,
 	}
 
 	// Alice initiates handshake
@@ -107,6 +117,55 @@ func TestX3DHHandshake(t *testing.T) {
 	if !bytes.Equal(aliceSession.MasterSharedKey, bobMasterKey) {
 		t.Fatalf("X3DH derived keys do not match!\nAlice: %x\nBob:   %x", aliceSession.MasterSharedKey, bobMasterKey)
 	}
+}
+
+func TestX3DHSignatureVerificationStrict(t *testing.T) {
+	aliceIK, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobIK, _ := GenerateKeyPair()
+	bobSPK, _ := GenerateKeyPair()
+	bobSignPub, bobSignPriv, _ := ed25519.GenerateKey(nil)
+	validSig := ed25519.Sign(bobSignPriv, bobSPK.PublicKey)
+
+	t.Run("missing_signing_key_rejected", func(t *testing.T) {
+		bundle := &PreKeyBundle{
+			IdentityKey:     bobIK.PublicKey,
+			SignedPreKey:    bobSPK.PublicKey,
+			SignedPreKeySig: validSig,
+		}
+		_, err := AliceInitiateHandshake(aliceIK, bundle)
+		if !errors.Is(err, ErrSignatureInvalid) {
+			t.Fatalf("expected ErrSignatureInvalid for omitted signing key, got: %v", err)
+		}
+	})
+
+	t.Run("missing_spk_sig_rejected", func(t *testing.T) {
+		bundle := &PreKeyBundle{
+			IdentityKey:        bobIK.PublicKey,
+			IdentitySigningKey: bobSignPub,
+			SignedPreKey:       bobSPK.PublicKey,
+		}
+		_, err := AliceInitiateHandshake(aliceIK, bundle)
+		if !errors.Is(err, ErrSignatureInvalid) {
+			t.Fatalf("expected ErrSignatureInvalid for omitted signature, got: %v", err)
+		}
+	})
+
+	t.Run("tampered_spk_rejected", func(t *testing.T) {
+		attackerSPK, _ := GenerateKeyPair()
+		bundle := &PreKeyBundle{
+			IdentityKey:        bobIK.PublicKey,
+			IdentitySigningKey: bobSignPub,
+			SignedPreKey:       attackerSPK.PublicKey, // swapped SPK
+			SignedPreKeySig:    validSig,              // signature was for bobSPK
+		}
+		_, err := AliceInitiateHandshake(aliceIK, bundle)
+		if !errors.Is(err, ErrSignatureInvalid) {
+			t.Fatalf("expected ErrSignatureInvalid for tampered SPK, got: %v", err)
+		}
+	})
 }
 
 func TestDoubleRatchetEndToEnd(t *testing.T) {
